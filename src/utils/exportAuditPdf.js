@@ -3,15 +3,31 @@ const AUDIT_TYPE_LABEL = {
   'social-compliance': 'Social Compliance',
   smeta: 'SMETA', bsci: 'BSCI', sa8000: 'SA 8000', ics: 'ICS',
 }
+const LOGO_URL = 'https://cdn.shopify.com/s/files/1/0494/0922/8958/files/logo.png?v=1614315516'
+
 function fmtDate(d) {
   if (!d) return '—'
   const dt = new Date(d)
   return isNaN(dt) ? d : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-export async function exportAuditPdf(audit) {
-  const [{ default: jsPDF }] = await Promise.all([
+async function fetchAsBase64(url) {
+  try {
+    const blob = await fetch(url).then(r => r.blob())
+    return await new Promise((res, rej) => {
+      const reader = new FileReader()
+      reader.onload = () => res(reader.result)
+      reader.onerror = rej
+      reader.readAsDataURL(blob)
+    })
+  } catch { return null }
+}
+
+export async function exportAuditPdf(audit, { logoUrl } = {}) {
+  const resolvedLogo = logoUrl ?? LOGO_URL
+  const [[{ default: jsPDF }], logoBase64] = await Promise.all([
     Promise.all([import('jspdf'), import('jspdf-autotable')]),
+    fetchAsBase64(resolvedLogo),
   ])
 
   const g   = audit.audit_general_info       ?? {}
@@ -41,7 +57,7 @@ export async function exportAuditPdf(audit) {
 
   const year  = audit.assessment_date ? new Date(audit.assessment_date).getFullYear() : new Date().getFullYear()
   const revNo = String((audit.revision_no ?? 0) + 1).padStart(2, '0')
-  const refBase = `TWIF-QA-AUD-${year}-001-REV`
+  const refBase = `JNG-QA-AUD-${year}-001-REV`
   const midY  = 8 + HH / 2 + 1.5
 
   doc.setDrawColor(180, 180, 180).setLineWidth(0.35)
@@ -49,9 +65,15 @@ export async function exportAuditPdf(audit) {
   doc.line(M + LOGO, 8, M + LOGO, 8 + HH)
   doc.line(M + LOGO + TTL, 8, M + LOGO + TTL, 8 + HH)
 
-  // Brand cell (logo removed)
-  doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(30, 30, 30)
-  doc.text('TWIF', M + LOGO / 2, midY, { align: 'center' })
+  // Logo cell
+  if (logoBase64) {
+    try { doc.addImage(logoBase64, M + 2, 9.5, LOGO - 4, HH - 3, '', 'FAST') }
+    catch { /* fallback below */ }
+  }
+  if (!logoBase64) {
+    doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(30, 30, 30)
+    doc.text('JNG', M + LOGO / 2, midY, { align: 'center' })
+  }
 
   // Title cell
   doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(17, 17, 17)

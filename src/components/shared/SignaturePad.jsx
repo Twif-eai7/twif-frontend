@@ -12,7 +12,7 @@ const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 // 2MB
 /**
  * Reusable Type / Draw / Upload signature capture — fully controlled, no
  * assumptions about who's signing. Used by both the vendor onboarding NDA
- * step and the Twif admin signature-settings screen.
+ * step and the JNG admin signature-settings screen.
  */
 export default function SignaturePad({
   mode,

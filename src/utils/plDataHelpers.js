@@ -101,7 +101,7 @@ export function computeOverallPoComm(po, baseValue, getJnmCommPct, getJngCommPct
   return { jnmPct, jngPct, jnmAmt, jngAmt, overall };
 }
 
-/** Per-PO single-rate commission (Twif / JNM mode). */
+/** Per-PO single-rate commission (JNG / JNM mode). */
 export function computeSinglePoComm(po, baseValue, getCommPct) {
   const pct = getCommPct(po.poNo, po.vendor, po.customer);
   const amt = pct != null ? roundComm(baseValue * pct / 100) : null;

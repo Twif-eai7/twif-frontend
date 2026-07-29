@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import  LogoMark  from '../ui/LogoMark'
 import { useAuth } from '../../hooks/useAuth'
 
 const NAV = [
@@ -70,14 +71,15 @@ export function AdminShell({ children }) {
       {/* ── Sidebar ─────────────────────────────── */}
       <aside className="fixed inset-y-0 left-0 w-56 bg-white border-r border-stone-200 flex flex-col z-30">
 
-        {/* Brand */}
+        {/* Logo */}
         <div className="px-5 py-4 border-b border-stone-100 flex items-center gap-2.5">
+          <LogoMark size={26} />
           <div>
             <div
               className="text-stone-900 text-base"
               style={{ fontFamily: "serif" }}
             >
-              Twif Portal
+              JNG Portal
             </div>
             <div className="text-[10px] font-medium text-stone-400 uppercase tracking-widest mt-0.5">
               Admin

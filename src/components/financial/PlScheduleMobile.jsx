@@ -120,9 +120,9 @@ export function OpenPoMobileCard({
                 readOnly={readOnly}
               />
             </div>
-            <MobileField label="Twif %" value={overall?.jngPct != null ? `${overall.jngPct}%` : "—"} />
+            <MobileField label="JNG %" value={overall?.jngPct != null ? `${overall.jngPct}%` : "—"} />
             <MobileField label="JNM $" value={overall?.jnmAmt != null ? fmtCommUsd(overall.jnmAmt) : "—"} valueClass="text-indigo-600 font-semibold" />
-            <MobileField label="Twif $" value={overall?.jngAmt != null ? fmtCommUsd(overall.jngAmt) : "—"} valueClass="text-violet-600 font-semibold" />
+            <MobileField label="JNG $" value={overall?.jngAmt != null ? fmtCommUsd(overall.jngAmt) : "—"} valueClass="text-violet-600 font-semibold" />
           </div>
           <MobileField
             label="Overall Comm"
@@ -228,9 +228,9 @@ export function ShippedPoMobileCard({
                 readOnly={readOnly}
               />
             </div>
-            <MobileField label="Twif %" value={overall?.jngPct != null ? `${overall.jngPct}%` : "—"} />
+            <MobileField label="JNG %" value={overall?.jngPct != null ? `${overall.jngPct}%` : "—"} />
             <MobileField label="JNM $" value={overall?.jnmAmt != null ? fmtCommUsd(overall.jnmAmt) : "—"} valueClass="text-indigo-600 font-semibold" />
-            <MobileField label="Twif $" value={overall?.jngAmt != null ? fmtCommUsd(overall.jngAmt) : "—"} valueClass="text-violet-600 font-semibold" />
+            <MobileField label="JNG $" value={overall?.jngAmt != null ? fmtCommUsd(overall.jngAmt) : "—"} valueClass="text-violet-600 font-semibold" />
           </div>
           <MobileField
             label="Overall Comm"

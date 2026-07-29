@@ -4,6 +4,8 @@ import { useAuthStore } from '../../stores/authStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { canAccessJnmPlFeatures } from '../../utils/jnmAccess'
 
+const LOGO_URL = 'https://cdn.shopify.com/s/files/1/0494/0922/8958/files/logo.png?v=1614315516'
+
 const ChevronDown = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 4l4 4 4-4" />
@@ -277,6 +279,27 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
               {showTab('orders', 'inspection-pending-dispatch') && <NavLink to="/dashboard/orders?tab=inspection-pending-dispatch" onNavigate={closeMobile}>Inspection Pending Dispatch</NavLink>}
             </NavCategory>
           )}
+          {showModule('fms') && (
+            <NavCategory title="Flow Management System" icon={<IconFlow />} to="/dashboard/fms" collapsed={collapsed}>
+              {showTab('fms', 'fms-dashboard-1') && <NavLink href="https://script.google.com/a/macros/jnitin.com/s/AKfycbx_KTOxCKsUDurCnlnF7BrLi_HdHyoVunDseN05k5-66AT578HvAlC6_NnSxElMk6KubA/exec" external>FMS 1 Dashboard</NavLink>}
+              {showTab('fms', 'fms-dashboard-2') && <NavLink href="https://script.google.com/a/macros/jnitin.com/s/AKfycbz4f4S5tWeMVxkJLvik1_7WiabT9Emdn3mYOtd8oDZzsO1OmRBhc3Cq8d1GLg7pw6E/exec" external>FMS 2 Dashboard</NavLink>}
+              {showTab('fms', 'fms-form') && <NavLink href="https://docs.google.com/forms/d/e/1FAIpQLSfyVHf8Y4b2kfstZmeMdddGTxqiMYvQ4uzqZ491YCckFZqnPg/viewform" external>FMS1 Form</NavLink>}
+              {showTab('fms', 'fms1') && <NavLink to="/dashboard/fms?tab=fms1" onNavigate={closeMobile}>FMS1 tracker</NavLink>}
+              {showTab('fms', 'fms2') && <NavLink to="/dashboard/fms?tab=fms2" onNavigate={closeMobile}>FMS2 tracker</NavLink>}
+              {showTab('fms', 'fms3') && <NavLink to="/dashboard/fms?tab=fms3" onNavigate={closeMobile}>FMS3 tracker</NavLink>}
+              {showTab('fms', 'fms4') && <NavLink to="/dashboard/fms?tab=fms4" onNavigate={closeMobile}>FMS4 tracker</NavLink>}
+            </NavCategory>
+          )}
+          {showModule('quality') && (
+            <NavCategory title="Quality & Compliance" icon={<IconCheck />} to="/dashboard/quality" collapsed={collapsed}>
+              {showTab('quality', 'audit-summary') && <NavLink to="/dashboard/quality?tab=audit-summary" onNavigate={closeMobile}>QA Reports</NavLink>}
+              <NavLink to="/qa-manual">QA Manual</NavLink>
+              {showTab('quality', 'ftpr-summary') && <NavLink to="/dashboard/quality?tab=ftpr-summary" onNavigate={closeMobile}>FTPR Summary</NavLink>}
+              {showTab('quality', 'po-inspection') && <NavLink to="/dashboard/quality?tab=po-inspection" onNavigate={closeMobile}>PO Inspection</NavLink>}
+              {showTab('quality', 'factory-audit') && <NavLink to="/dashboard/quality?tab=factory-audit" onNavigate={closeMobile}>Factory Audits</NavLink>}
+              {showTab('quality', 'irf') && <NavLink href="https://docs.google.com/forms/d/e/1FAIpQLSfK1cahk57yU9Y7u9VJO23Nyz_LYuPMd-L3ZLp10kqCwOqt5w/viewform?usp=dialog" external>IRF</NavLink>}
+            </NavCategory>
+          )}
           {showModule('financial') && (
             <NavCategory title="Financial" icon={<IconDollar />} to="/dashboard/financial" collapsed={collapsed}>
               {showTab('financial', 'invoice-list') && <NavLink to="/dashboard/financial?tab=invoice-list" onNavigate={closeMobile}>Invoices</NavLink>}
@@ -304,6 +327,25 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
               {showTab('logistics', 'shipment-containers') && <NavLink to="/dashboard/logistics?tab=shipment-containers" onNavigate={closeMobile}>Logistics MIS</NavLink>}
             </NavCategory>
           )}
+          <NavCategory title="HR One Portal" icon={<IconGrid />} href="#" collapsed={collapsed}>
+            <NavLink href="https://app.hrone.cloud/app" external>Access Hr One</NavLink>
+          </NavCategory>
+          {showModule('tools') && (
+            <NavCategory title="Travel" icon={<IconOrder />} to="/dashboard/tools" collapsed={collapsed}>
+              {showTab('tools', 'travel-form') && <NavLink href="https://docs.google.com/forms/d/e/1FAIpQLSdTKuHSCJvHrVQzz8ezjFKV7zLzOudcIYdbp_35uV_VhEESVg/viewform?urp=gmail_link" external>Place a request</NavLink>}
+              {showTab('tools', 'travel-bill') && <NavLink to="/dashboard/tools?tab=travel-bill" onNavigate={closeMobile}>Upload Travel Bill</NavLink>}
+            </NavCategory>
+          )}
+          {showModule('issues') && (
+            <NavCategory title="Issue Tracker" icon={<IconCheck />} to="/dashboard/issues" collapsed={collapsed}>
+              {showTab('issues', 'issue-tracker') && <NavLink to="/dashboard/issues?tab=issue-tracker" onNavigate={closeMobile}>Issue Tracker</NavLink>}
+              {showTab('issues', 'jit-dashboard') && <NavLink href="https://app.powerbi.com/links/Fc41FXMkSw?ctid=5f2b49b9-47dc-4f69-a85d-6053b60cf04c&pbi_source=linkShare" external>JIT dashboard</NavLink>}
+              {showTab('issues', 'merchant-performance') && <NavLink href="https://app.powerbi.com/links/HWRkvWtfhF?ctid=5f2b49b9-47dc-4f69-a85d-6053b60cf04c&pbi_source=linkShare" external>Merchant Performance</NavLink>}
+            </NavCategory>
+          )}
+          <NavCategory title="Tech Enhancement Request" icon={<IconOrder />} href="#" collapsed={collapsed}>
+            <NavLink href="https://docs.google.com/forms/d/1YTCIZjYhHzGNmIxj4xjTmTp1Km-Vc73ySI4JhaS-XLY/viewform?edit_requested=true" external>Tech Requirements (TER)</NavLink>
+          </NavCategory>
         </>
       )
     })()
@@ -367,6 +409,7 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
       >
         <div className="flex items-center justify-between px-3 py-3 bg-black text-white border-b border-white/10">
           <div className="flex items-center gap-2">
+            <img src={LOGO_URL} alt="Logo" className="w-7 h-7 rounded-md bg-white p-0.5 object-contain flex-shrink-0" />
             {!collapsed && <span className="font-semibold text-sm leading-tight">{title}</span>}
           </div>
           <button

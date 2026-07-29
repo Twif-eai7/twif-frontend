@@ -694,7 +694,7 @@ export default function InternationalCourierLogModal({ row, onSave, onClose, upl
           <div className="grid grid-cols-2 gap-4">
             <SelectField label="Courier Cost By" required value={form.courier_cost_by}
               onChange={val => patch('courier_cost_by', val)}
-              options={['Buyer', 'Twif', 'Supplier']} />
+              options={['Buyer', 'JNG', 'Supplier']} />
             <SelectField label="Charge To" required value={form.charge_to}
               onChange={val => patch('charge_to', val)}
               options={['Buyer', 'Jnitin Account', 'Buyer Account']} />

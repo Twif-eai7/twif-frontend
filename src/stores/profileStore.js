@@ -9,22 +9,10 @@ const ORG_TYPE_TO_ROLE = {
   supplier: 'Supplier',
 }
 
-/** Map legacy JNG / J Nitin Global org labels to Twif for UI display. */
-function displayOrgBrand(name) {
-  if (!name) return ''
-  const normalized = name.trim().replace(/\s+/g, ' ')
-  if (/^j\s*nitin\s*global(\s+llp)?$/i.test(normalized)) return 'TWIF TECH LLP'
-  if (/^jnitin\s+global(\s+llp)?$/i.test(normalized)) return 'TWIF TECH LLP'
-  if (/^jng(\s+llp)?$/i.test(normalized)) return 'TWIF TECH LLP'
-  return name
-}
-
 function computeProfileHeader(pu, orgMembership) {
   if (!pu && !orgMembership) return null
   const fullName     = orgMembership?.fullName || ''
-  const businessName = displayOrgBrand(
-    orgMembership?.orgDisplayName || orgMembership?.orgName || ''
-  )
+  const businessName = orgMembership?.orgDisplayName || orgMembership?.orgName || ''
   const roleName     = orgMembership?.orgType ? ORG_TYPE_TO_ROLE[orgMembership.orgType] ?? '' : ''
   const initials = (fullName || businessName)
     .split(' ').map((w) => w[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '--'

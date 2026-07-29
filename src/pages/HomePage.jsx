@@ -1,4 +1,6 @@
 import { useNavigate } from 'react-router-dom'
+import { LogoMark } from '../components/ui'
+
 const FEATURES = [
   { icon: '📦', name: 'Order Management', desc: 'Track purchase orders, shipments, and delivery status in real time.' },
   { icon: '✅', name: 'Quality & Compliance', desc: 'QA reports, audit summaries, and compliance docs unified.' },
@@ -54,8 +56,9 @@ export default function HomePage() {
           style={{ boxShadow: '0 0 0 0.5px rgba(19,19,22,0.12), 0 2px 3px rgba(0,0,0,0.04), 0 4px 6px rgba(34,42,53,0.04)' }}
         >
           <button onClick={() => navigate('/')} className="flex items-center gap-2.5 hover:opacity-75 transition-opacity">
+            <LogoMark size={28} />
             <span className="text-stone-900 text-lg hidden sm:block" style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}>
-              Twif Portal
+              JNG Portal
             </span>
           </button>
 
@@ -264,7 +267,8 @@ export default function HomePage() {
       <footer className="border-t border-stone-200 px-6 py-8">
         <div className="max-w-5xl mx-auto flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-2.5">
-            <span className="text-sm text-stone-400">© 2025 Twif Portal. All rights reserved.</span>
+            <LogoMark size={22} />
+            <span className="text-sm text-stone-400">© 2025 JNG Portal. All rights reserved.</span>
           </div>
           <div className="flex gap-6">
             {['Privacy', 'Terms', 'Support'].map(l => (

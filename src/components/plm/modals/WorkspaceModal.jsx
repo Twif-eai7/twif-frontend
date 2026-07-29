@@ -1708,7 +1708,7 @@ export default function WorkspaceModal() {
         <div className="flex items-center flex-wrap gap-3">
         <div className="flex items-center flex-wrap divide-x divide-black/[.12]">
           <div className="pr-5">
-            <div className="text-[9px] font-bold uppercase tracking-[.1em] text-black mb-0.5">Twif SKU</div>
+            <div className="text-[9px] font-bold uppercase tracking-[.1em] text-black mb-0.5">JNG SKU</div>
             <div className="text-[13px] font-extrabold font-mono text-[#1A1A18]">{autoCode}</div>
           </div>
           {role !== 'buyer' && (

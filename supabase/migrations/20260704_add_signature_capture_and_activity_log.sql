@@ -1,12 +1,12 @@
 -- Type/Draw/Upload signature capture for vendor NDA, a reusable admin-signature store
--- (used for Twif's countersignature on approval), and a simplified activity log for the
+-- (used for JNG's countersignature on approval), and a simplified activity log for the
 -- signed-PDF audit trail.
 
 -- Vendor's signature (captured at submission)
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS nda_signature_type text; -- 'typed' | 'drawn' | 'uploaded'
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS nda_signature_image text; -- base64 PNG, drawn/uploaded modes
 
--- Reusable admin/Twif signature store — set up once, reused for every future approval.
+-- Reusable admin/JNG signature store — set up once, reused for every future approval.
 CREATE TABLE IF NOT EXISTS admin_signatures (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name text NOT NULL,

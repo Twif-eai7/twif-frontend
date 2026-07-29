@@ -1,3 +1,4 @@
+export { default as LogoMark } from './LogoMark'
 export { Button } from './Button'
 export { Spinner } from './Spinner'
 export { Alert } from './Alert'

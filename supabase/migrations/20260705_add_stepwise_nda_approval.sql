@@ -1,5 +1,5 @@
 -- Explicit step-wise approval workflow for supplier NDAs: Verify (admin reviews the
--- exact PDF that will be sent) -> Sign (Twif countersigns, captured fresh per approval)
+-- exact PDF that will be sent) -> Sign (JNG countersigns, captured fresh per approval)
 -- -> Approve (final; sends the executed PDF to both parties). Each step is gated on
 -- the previous one via these columns.
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS nda_verified_at timestamptz;

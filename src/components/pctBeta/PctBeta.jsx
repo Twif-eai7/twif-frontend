@@ -10,6 +10,7 @@ import {
   NAV_BUYERS,
   TABS,
 } from './constants'
+import { LogoMark } from '../ui'
 import { Icon, IconChevron, IconBell, IconCheck, IconWarn } from './icons'
 import DashboardScreen from './screens/DashboardScreen'
 import WorkflowScreen from './screens/WorkflowScreen'
@@ -44,7 +45,8 @@ function GlobalTopbar() {
   return (
     <div className="flex items-center justify-between px-5 h-12 bg-[#0a1628] border-b border-white/10 flex-shrink-0 md:px-5">
       <div className="flex items-center gap-3">
-        <span className="text-white text-[15px] font-bold tracking-[-.2px]">Twif Platform</span>
+        <LogoMark size={32} dark={false} />
+        <span className="text-white text-[15px] font-bold tracking-[-.2px]">JNG Platform</span>
       </div>
 
       <div className="relative" ref={wrapRef}>

@@ -550,7 +550,7 @@ export default function CourierLogModal({ row, onSave, onClose, uploadInvoice })
                 <select value={form.cost_centre} onChange={e => patch('cost_centre', e.target.value)}
                   className={selectCls}>
                   <option value="">— Select —</option>
-                  <option value="jng">Twif</option>
+                  <option value="jng">JNG</option>
                   <option value="vendor">Vendor</option>
                 </select>
                 <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 stroke-gray-400 pointer-events-none" viewBox="0 0 24 24" fill="none" strokeWidth="2.5">

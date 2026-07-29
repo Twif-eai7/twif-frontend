@@ -12,10 +12,14 @@ import OnboardingPage from './pages/Auth/OnboardingPage'
 import Dashboard from './pages/Dashboard/Dashboard'
 import AnalyticsSection from './pages/Dashboard/sections/AnalyticsSection'
 import OrdersSection    from './pages/Dashboard/sections/OrdersSection'
+import FmsSection       from './pages/Dashboard/sections/FmsSection'
+import QualitySection   from './pages/Dashboard/sections/QualitySection'
 import FinancialSection from './pages/Dashboard/sections/FinancialSection'
 import NpdSection       from './pages/Dashboard/sections/NpdSection'
 import ProfileSection   from './pages/Dashboard/sections/ProfileSection'
 import SupportSection   from './pages/Dashboard/sections/SupportSection'
+import ToolsSection     from './pages/Dashboard/sections/ToolsSection'
+import IssuesSection    from './pages/Dashboard/sections/IssuesSection'
 import CatalogsSection  from './pages/Dashboard/sections/CatalogsSection'
 import LogisticsSection from './pages/Dashboard/sections/LogisticsSection'
 import PctBetaPage from './pages/PctBetaPage'
@@ -34,6 +38,7 @@ import { useAuth } from './hooks/useAuth'
 import { useRecentWorkspaces } from './hooks/useRecentWorkspaces'
 import { useProfileStore } from './stores/profileStore'
 import { Spinner } from './components/ui'
+import QualityManual from './pages/Dashboard/sections/QualityManual'
 
 /**
  * Guards a route by auth session + profile load.
@@ -97,11 +102,15 @@ export default function App() {
           <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>}>
             <Route index            element={<AnalyticsSection />} />
             <Route path="orders"    element={<OrdersSection />} />
+            <Route path="fms"       element={<FmsSection />} />
+            <Route path="quality"   element={<QualitySection />} />
             <Route path="financial" element={<FinancialSection />} />
             <Route path="logistics" element={<LogisticsSection />} />
             <Route path="npd"       element={<NpdSection />} />
             <Route path="profile"   element={<ProfileSection />} />
             <Route path="support"   element={<SupportSection />} />
+            <Route path="tools"     element={<ToolsSection />} />
+            <Route path="issues"    element={<IssuesSection />} />
             {/* <Route path="analytics-v2" element={<AnalyticsV2Section />} />
             <Route path="analytics-v3" element={<AnalyticsV3Section />} /> */}
             <Route path="analytics-demo" element={<AnalyticsDummySection />} />
@@ -114,6 +123,7 @@ export default function App() {
           <Route path="/plm/vedeeo" element={<RequireAuth><PLMVedeeoPage /></RequireAuth>} />
           <Route path="/plm" element={<RequireAuth><PLMPage /></RequireAuth>} />
           <Route path="/plm/accept" element={<PLMAccessPage />} />
+          <Route path="/qa-manual" element={<RequireAuth><QualityManual /></RequireAuth>} />
           <Route path="/user-manual" element={ <RequireAuth><UserManualPage /> </RequireAuth>} />
 
 

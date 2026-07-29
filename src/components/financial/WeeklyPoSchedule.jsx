@@ -255,9 +255,9 @@ const OPEN_COLS = [
 
 const OVERALL_COMM_COLS = [
   { label: "Comm JNM %",   align: "right", w: "min-w-[100px]" },
-  { label: "Comm Twif %",   align: "right", w: "min-w-[100px]" },
+  { label: "Comm JNG %",   align: "right", w: "min-w-[100px]" },
   { label: "Comm JNM $",   align: "right", w: "min-w-[110px]" },
-  { label: "Comm Twif $",   align: "right", w: "min-w-[110px]" },
+  { label: "Comm JNG $",   align: "right", w: "min-w-[110px]" },
   { label: "Overall Comm", align: "right", w: "min-w-[120px]" },
 ];
 
@@ -289,7 +289,7 @@ function formatPoShpDateLabel(lines, inPeriod = () => true) {
   return shpDates.length === 1 ? fmt(shpDates[0]) : `${fmt(shpDates[0])}–${fmt(shpDates[shpDates.length - 1])}`;
 }
 
-// ─── Overall P&L commission cells (JNM from commission_rates, Twif from buyer_consultancy_fee) ─
+// ─── Overall P&L commission cells (JNM from commission_rates, JNG from buyer_consultancy_fee) ─
 function OverallCommissionCells({ po, baseValue, getJnmCommPct, getJngCommPct, commissionMap, onSave, readOnly }) {
   const { jnmPct, jngPct, jnmAmt, jngAmt, overall } = computeOverallPoComm(po, baseValue, getJnmCommPct, getJngCommPct);
 
@@ -987,7 +987,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
   }, [plMode]);
 
   // ── effective commission % — switches by P&L mode ─────────────────────────
-  // Twif: buyer_consultancy_fee (+ PO manual override in Twif mode only)
+  // JNG: buyer_consultancy_fee (+ PO manual override in JNG mode only)
   // JNM: commission_rates vendor+buyer (+ PO manual override)
   const getJngCommPct = useCallback((poNo, vendor, customer) => {
     const entry = buyerRateMap[normStr(customer)];
@@ -1472,7 +1472,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
             const wkJnmSComm = shipComm.jnm;
             const wkJngSComm = shipComm.jng;
 
-            // Flat monthly fee (e.g. AS CHEHOMA) — Twif / Overall, month view only, once per unique buyer
+            // Flat monthly fee (e.g. AS CHEHOMA) — JNG / Overall, month view only, once per unique buyer
             const flatFeeTotal = ((plMode === "jng" || plMode === "overall") && view === "month")
               ? (() => {
                   const seen = new Set();
@@ -1873,7 +1873,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
                             ...(plMode === "overall"
                               ? [
                                   { label: "JNM Comm", value: wkJnmOComm > 0 ? fmt(wkJnmOComm, true) : "—", className: "text-violet-300" },
-                                  { label: "Twif Comm", value: wkJngOComm > 0 ? fmt(wkJngOComm, true) : "—", className: "text-violet-300" },
+                                  { label: "JNG Comm", value: wkJngOComm > 0 ? fmt(wkJngOComm, true) : "—", className: "text-violet-300" },
                                   { label: "Overall", value: wkOverallOComm > 0 ? fmt(wkOverallOComm, true) : "—", className: "text-violet-300" },
                                 ]
                               : [{ label: "Commission", value: wkOComm > 0 ? fmt(wkOComm, true) : "—", className: "text-violet-300" }]),
@@ -2048,7 +2048,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
                             ...(plMode === "overall"
                               ? [
                                   { label: "JNM Comm", value: wkJnmSComm > 0 ? fmt(wkJnmSComm, true) : "—", className: "text-violet-300" },
-                                  { label: "Twif Comm", value: wkJngSComm > 0 ? fmt(wkJngSComm, true) : "—", className: "text-violet-300" },
+                                  { label: "JNG Comm", value: wkJngSComm > 0 ? fmt(wkJngSComm, true) : "—", className: "text-violet-300" },
                                   { label: "Overall", value: shipComm.jnm + shipComm.jng > 0 ? fmt(shipComm.jnm + shipComm.jng, true) : "—", className: "text-violet-300" },
                                 ]
                               : [{ label: "Commission", value: wkSComm > 0 ? fmt(wkSComm, true) : "—", className: "text-violet-300" }]),

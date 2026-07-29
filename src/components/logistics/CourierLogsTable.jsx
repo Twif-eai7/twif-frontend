@@ -422,7 +422,7 @@ export default function CourierLogsTable() {
           <FilterDate           label="To"           value={localFilters.dateTo}        onChange={v => patchLocal('dateTo', v)} />
           <FilterSearchDropdown label="Merchant"     value={localFilters.merchant_name} onChange={v => patchLocal('merchant_name', v)} options={filterOptions.merchants} placeholder="Search merchant…" />
           <FilterSearchDropdown label="Vendor"       value={localFilters.vendor_name}   onChange={v => patchLocal('vendor_name', v)}   options={filterOptions.vendors}   placeholder="Search vendor…" />
-          <FilterInput          label="Cost Centre"  value={localFilters.cost_centre}   onChange={v => patchLocal('cost_centre', v)}   placeholder="e.g. Twif" />
+          <FilterInput          label="Cost Centre"  value={localFilters.cost_centre}   onChange={v => patchLocal('cost_centre', v)}   placeholder="e.g. JNG" />
           <FilterInput          label="Search"       value={localFilters.search}        onChange={v => patchLocal('search', v)}        placeholder="Invoice, Tracking Number…" />
           <div className="flex gap-2 items-end pb-0.5">
             <button onClick={applyFilters}

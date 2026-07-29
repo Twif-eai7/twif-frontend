@@ -18,7 +18,7 @@ const NAV_ITEMS = [
 ];
 
 const HERO_META = [
-  { label: "Document No.", value: "TWIF/QMS/QM/001" },
+  { label: "Document No.", value: "JNG/QMS/QM/001" },
   { label: "Revision",     value: "00"             },
   { label: "Effective",    value: "1 Oct 2025"     },
 ];
@@ -465,7 +465,7 @@ export default function QualityManual() {
           {/* Document footer */}
           <div className="flex items-center gap-2 pt-8 mt-12 border-t border-gray-200
                           text-[11px] text-gray-400 flex-wrap">
-            <span>TWIF-QMS-QM-2025-001-REV00</span>
+            <span>JNG-QMS-QM-2025-001-REV00</span>
             <span>·</span>
             <span>Jnitin Global</span>
             <span>·</span>

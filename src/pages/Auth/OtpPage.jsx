@@ -16,7 +16,7 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
   const forcedRole = routeForcedRole || stateForcedRole
   const logoSuffix = forcedRole === 'buyer' ? 'Buyer' : forcedRole === 'supplier' ? 'Vendor' : undefined
   // The dedicated /auth/vendor/verify-otp route drops "Portal" for a shorter header.
-  const logoLabel = forcedRole === 'supplier' ? 'Twif - Vendor' : undefined
+  const logoLabel = forcedRole === 'supplier' ? 'JNG - Vendor' : undefined
 
   const [verifiedUser, setVerifiedUser] = useState(null)
   const [verifying, setVerifying] = useState(false)
