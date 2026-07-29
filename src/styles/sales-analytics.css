@@ -1,0 +1,59 @@
+/* Grid layout only — all card/tab/table styles live in MerchantDashboard.jsx (Tailwind) */
+
+.magic-bento-grid {
+  display: grid;
+  gap: 1em;
+  margin: 0 auto;
+  user-select: none;
+}
+
+/* Per-row min-heights — cards grow with content above these floors */
+/* ── Edit these to control minimum row sizes ── */
+[data-card-id="fy26_shipped"],
+[data-card-id="open_po"],
+[data-card-id="volume_shipped"],
+[data-card-id="fy25_shipped"]       { min-height: 220px; }
+
+[data-card-id="shipped_po_count"],
+[data-card-id="open_pos_count"],
+[data-card-id="growth_rate"],
+[data-card-id="actual_growth"]      { min-height: 160px; }
+
+[data-card-id="sourcing_by_region"],
+[data-card-id="open_po_monthly"]    { min-height: 360px; }
+[data-card-id="volume_over_time"],
+[data-card-id="volume_fy26"],
+[data-card-id="volume_fy27"]        { min-height: 400px; }
+
+@media (min-width: 1024px) {
+  .magic-bento-grid {
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+  [data-card-id="fy26_shipped"]       { grid-column: 1; grid-row: 1; }
+  [data-card-id="open_po"]            { grid-column: 2; grid-row: 1; }
+  [data-card-id="volume_shipped"]     { grid-column: 3; grid-row: 1; }
+  [data-card-id="fy25_shipped"]       { grid-column: 4; grid-row: 1; }
+  [data-card-id="shipped_po_count"]   { grid-column: 1; grid-row: 2; }
+  [data-card-id="open_pos_count"]     { grid-column: 2; grid-row: 2; }
+  [data-card-id="growth_rate"]        { grid-column: 3; grid-row: 2; }
+  [data-card-id="actual_growth"]      { grid-column: 4; grid-row: 2; }
+  [data-card-id="sourcing_by_region"] { grid-column: 1 / span 2; grid-row: 3; }
+  [data-card-id="open_po_monthly"]    { grid-column: 3 / span 2; grid-row: 3; }
+  [data-card-id="volume_over_time"]   { grid-column: 1 / span 4; grid-row: 4; }
+  [data-card-id="volume_fy26"]        { grid-column: 1 / span 2; grid-row: 4; }
+  [data-card-id="volume_fy27"]        { grid-column: 3 / span 2; grid-row: 4; }
+}
+
+@media (min-width: 600px) and (max-width: 1023px) {
+  .magic-bento-grid { grid-template-columns: repeat(2, 1fr); }
+  [data-card-id="volume_over_time"] { grid-column: 1 / span 2; }
+}
+
+@media (max-width: 599px) {
+  .magic-bento-grid { grid-template-columns: 1fr; }
+}
+
+.grid-template-ftpr {
+  grid-template-columns: 2.5fr 1fr 1fr 1.5fr;
+}

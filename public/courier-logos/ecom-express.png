@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+   <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>Delhivery X Ecom Express</title>
+      <meta name="description" content="Delhivery and Ecom Express unite to serve a growing India. This integration is about powering your growth.Delhivery is an integrated logistics service provider that provides express parcel, cross-border, supply chain, warehousing, freight, courier, data intelligence and fulfillment services. Delhivery's infrastructure, network design and engineering capabilities helps deliver cheaper, faster and precise supply chain solutions to thousands of businesses daily.">
+      <link rel="icon" type="image/png" href="assets/images//logo.svg" />
+      <link rel="canonical" href="https://www.ecomexpress.in/" />
+      <script src="https://cdn.tailwindcss.com"></script>
+      <script src="https://unpkg.com/feather-icons"></script>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
+   </head>
+   <body class="h-screen md:overflow-hidden m-0">
+      <header class="bg-black shadow-md z-20 relative  z-20 sticky top-0">
+         <div class="container mx-auto px-6 py-6 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+               <img src="assets/images/logo.svg" alt="Logo" class="" />
+            </div>
+         </div>
+      </header>
+      <section class="relative bg-cover bg-center h-4/6 md:h-[100vh] flex items-center justify-center text-center px-4 home-banner">
+         <div class="absolute inset-0 bg-black/20"></div>
+         <div class="relative z-10 text-white bottom-36 sm:bottom-28 md:bottom-38 xl:bottom-32">
+            <h1 class="text-3xl md:text-6xl xl:text-7xl font-extrabold mb-8">Better Together</h1>
+            <p class="text-base md:text-2xl xl:text-3xl font-semibold max-w-xl mb-6 md:mb-6 xl:mb-12">Delhivery and Ecom Express Unite
+               to Serve a Growing India.
+            </p>
+            <div class="hidden md:flex justify-center">
+               <a href="https://www.delhivery.com/" class="flex justify-center md:w-80 justify-between items-center bg-black text-white text-lg font-semibold px-8 py-4 rounded-md gap-6">
+                  Continue to Delhivery
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16" fill="none">
+                     <path d="M14 8L0.5 15.7942L0.5 0.205771L14 8Z" fill="white"/>
+                  </svg>
+               </a>
+            </div>
+         </div>
+      </section>
+      <section class="block md:hidden -mt-40 relative z-10 p-6 bg-[#242020]">
+         <div class="flex justify-center">
+            <a href="https://www.delhivery.com/" class=" block md:hidden w-80 flex justify-between items-center bg-[#ED4136] text-white text-lg font-semibold px-8 py-4 rounded-md gap-6">
+               Continue to Delhivery
+               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="18" viewBox="0 0 20 18" fill="none">
+                  <path d="M19.8052 9.50189L12.3823 17.6671C12.2385 17.8295 12.0344 17.9083 11.8349 17.9083C11.6565 17.9083 11.4775 17.8445 11.3352 17.7155C11.0322 17.44 11.0097 16.9704 11.2852 16.6675L17.5784 9.74314H0.700536C0.290235 9.74314 0 9.41119 0 9.0426C0 8.67401 0.290235 8.25856 0.700536 8.25856H17.5784L11.2828 1.33206C11.0073 1.02907 11.0298 0.559155 11.3328 0.284043C11.6366 0.0100457 12.1057 0.0303196 12.3818 0.334798L19.8047 8.49999C20.065 8.7828 20.065 9.21889 19.8052 9.50189Z" fill="white"/>
+               </svg>
+            </a>
+         </div>
+         <div>
+            <p class="text-xs text-white pt-10 pb-8">With a full suite of scaled services, we’re equipped to meet logistics 
+               needs for businesses and consumers across India.
+            </p>
+            <div class="inner-box">
+               <h3 class="text-base font-normal text-white pb-10">Accelerating your businesses</h3>
+               <div class="grid grid-cols-2 sm:grid-cols-2 gap-6 mb-5">
+                  <div class="thumbnail-img flex flex-col items-star rounded-md">
+                     <img class="rounded-md w-full h-32 object-cover" src="assets/images/service-img1.png" />
+                     <h5 class="text-white text-sm py-3">Express Parcel</h5>
+                     <p class="text-xs text-white pb-3">
+                        Most preferred logistics provider for D2C brands and small businesses.
+                     </p>
+                  </div>
+                  <div class="thumbnail-img flex flex-col items-start rounded-md">
+                     <img class="rounded-md w-full h-32 object-cover" src="assets/images/service-img2.png" />
+                     <h5 class="text-white text-sm py-3">Part Truckload</h5>
+                     <p class="text-xs text-white pb-3">
+                        India’s fastest growing network for B2B shipping to every corner of India.
+                     </p>
+                  </div>
+                  <div class="thumbnail-img flex flex-col items-start rounded-md">
+                     <img class="rounded-md w-full h-32 object-cover" src="assets/images/service-img3.png" />
+                     <h5 class="text-white text-sm py-3">Warehousing</h5>
+                     <p class="text-xs text-white pb-3">
+                        Pan-India network of warehousing integrated with transportation, designed for speed and cost saving.
+                     </p>
+                  </div>
+                  <div class="thumbnail-img flex flex-col items-start rounded-md">
+                     <img class="rounded-md w-full h-32 object-cover" src="assets/images/service-img4.png" />
+                     <h5 class="text-white text-sm py-3">Full Truckload</h5>
+                     <p class="text-xs text-white pb-3">
+                        End-to-end trucking solutions to move large volumes efficiently across India.
+                     </p>
+                  </div>
+                  <div class="thumbnail-img flex flex-col items-start rounded-md">
+                     <img class="rounded-md w-full h-32 object-cover" src="assets/images/service-img5.png" />
+                     <h5 class="text-white text-sm py-3">Software Solutions</h5>
+                     <p class="text-xs text-white pb-3">
+                        AI-powered Transport Management Software (TMS) for optimised decisions on logistics.
+                     </p>
+                  </div>
+                  <div class="thumbnail-img flex flex-col items-start rounded-md">
+                     <img class="rounded-md w-full h-32 object-cover" src="assets/images/service-img7.png" />
+                     <h5 class="text-white text-sm py-3">Cross Border</h5>
+                     <p class="text-xs text-white pb-3">
+                        Seamless international shipping to 220+ countries and territories – express and LCL.
+                     </p>
+                  </div>
+               </div>
+            </div>
+         </div>
+      </section>
+      <section class="block md:hidden relative p-6 bg-[#ED1B36]">
+         <div class="inner-box">
+            <img class="w-48 my-8" src="assets/images/delhivery-direct-logo.png" />
+            <h3 class="text-base font-bold text-white pb-10">Bringing convenience to your homes</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-2 gap-6 mb-5">
+               <div class="thumbnail-img flex flex-col items-star rounded-md">
+                  <img class="rounded-md w-full h-32 object-cover" src="assets/images/ecom-footer1.jpg" />
+                  <h5 class="text-white text-sm py-3">Intercity Courier</h5>
+                  <p class="text-xs text-white pb-3">
+                     Free doorstep pickup, and 
+                     nationwide parcel delivery for 
+                     consumers or businesses.
+                  </p>
+               </div>
+               <div class="thumbnail-img flex flex-col items-start rounded-md">
+                  <img class="rounded-md w-full h-32 object-cover" src="assets/images/ecom-footer3.png" />
+                  <h5 class="text-white text-sm py-3">Local Deliveries</h5>
+                  <p class="text-xs text-white pb-3">
+                     Quick, reliable local delivery for your 
+                     business, forgotten items, or anything 
+                     else, with real-time tracking.
+                  </p>
+               </div>
+            </div>
+            <div class="flex justify-center">
+              <a href="https://www.delhivery.com/" class=" block md:hidden w-80 flex justify-between items-center bg-black text-white text-lg font-semibold px-8 py-4 rounded-md gap-6">
+                 Continue to Delhivery
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="18" viewBox="0 0 20 18" fill="none">
+                    <path d="M19.8052 9.50189L12.3823 17.6671C12.2385 17.8295 12.0344 17.9083 11.8349 17.9083C11.6565 17.9083 11.4775 17.8445 11.3352 17.7155C11.0322 17.44 11.0097 16.9704 11.2852 16.6675L17.5784 9.74314H0.700536C0.290235 9.74314 0 9.41119 0 9.0426C0 8.67401 0.290235 8.25856 0.700536 8.25856H17.5784L11.2828 1.33206C11.0073 1.02907 11.0298 0.559155 11.3328 0.284043C11.6366 0.0100457 12.1057 0.0303196 12.3818 0.334798L19.8047 8.49999C20.065 8.7828 20.065 9.21889 19.8052 9.50189Z" fill="white"/>
+                 </svg>
+              </a>
+           </div>
+         </div>
+      </section>
+      <style>
+         body{
+         font-family: "Inter", sans-serif;
+         }
+         .home-banner{
+         background-image: url('assets/images/home-banner.jpg');
+         background-position: 50% 30%;
+         }
+         @media (max-width: 768px) {
+         .home-banner {
+         background-position: center top;
+         background-size: 132% 100%;
+         background-repeat: no-repeat;
+         }
+         }
+         @media (max-width: 450px) {
+         .h-32{
+          height: 5rem;
+         }
+        }
+         @media (max-height: 1100px) {
+         .home-banner {
+         background-position: center 36%
+         }
+         }
+      </style>
+   </body>
+</html>
