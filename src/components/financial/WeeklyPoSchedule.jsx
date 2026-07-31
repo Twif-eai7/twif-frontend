@@ -255,9 +255,9 @@ const OPEN_COLS = [
 
 const OVERALL_COMM_COLS = [
   { label: "Comm JNM %",   align: "right", w: "min-w-[100px]" },
-  { label: "Comm JNG %",   align: "right", w: "min-w-[100px]" },
+  { label: "Comm TWIF %",  align: "right", w: "min-w-[100px]" },
   { label: "Comm JNM $",   align: "right", w: "min-w-[110px]" },
-  { label: "Comm JNG $",   align: "right", w: "min-w-[110px]" },
+  { label: "Comm TWIF $",  align: "right", w: "min-w-[110px]" },
   { label: "Overall Comm", align: "right", w: "min-w-[120px]" },
 ];
 
@@ -1873,7 +1873,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
                             ...(plMode === "overall"
                               ? [
                                   { label: "JNM Comm", value: wkJnmOComm > 0 ? fmt(wkJnmOComm, true) : "—", className: "text-violet-300" },
-                                  { label: "JNG Comm", value: wkJngOComm > 0 ? fmt(wkJngOComm, true) : "—", className: "text-violet-300" },
+                                  { label: "TWIF Comm", value: wkJngOComm > 0 ? fmt(wkJngOComm, true) : "—", className: "text-violet-300" },
                                   { label: "Overall", value: wkOverallOComm > 0 ? fmt(wkOverallOComm, true) : "—", className: "text-violet-300" },
                                 ]
                               : [{ label: "Commission", value: wkOComm > 0 ? fmt(wkOComm, true) : "—", className: "text-violet-300" }]),
@@ -2048,7 +2048,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
                             ...(plMode === "overall"
                               ? [
                                   { label: "JNM Comm", value: wkJnmSComm > 0 ? fmt(wkJnmSComm, true) : "—", className: "text-violet-300" },
-                                  { label: "JNG Comm", value: wkJngSComm > 0 ? fmt(wkJngSComm, true) : "—", className: "text-violet-300" },
+                                  { label: "TWIF Comm", value: wkJngSComm > 0 ? fmt(wkJngSComm, true) : "—", className: "text-violet-300" },
                                   { label: "Overall", value: shipComm.jnm + shipComm.jng > 0 ? fmt(shipComm.jnm + shipComm.jng, true) : "—", className: "text-violet-300" },
                                 ]
                               : [{ label: "Commission", value: wkSComm > 0 ? fmt(wkSComm, true) : "—", className: "text-violet-300" }]),

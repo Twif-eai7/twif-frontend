@@ -32,7 +32,7 @@ const fmtUsd = (n) =>
 const fmtPct = (n) =>
   n == null || n === "" || isNaN(n) ? "—" : `${Number(n).toFixed(1)}%`;
 
-const MODE_LABELS = { jng: "P&L JNG", jnm: "P&L JNM", overall: "Overall P&L" };
+const MODE_LABELS = { jng: "P&L TWIF", jnm: "P&L JNM", overall: "Overall P&L" };
 
 const PL_SUMMARY_TABLE_SCROLL = "pl-week-table-scroll overflow-auto max-h-[62vh] relative";
 const plSummaryThClass = (alignLeft = false) =>
@@ -44,9 +44,9 @@ function weekHeaders(plMode) {
   if (plMode === "overall") {
     return [
       ...base,
-      "Comm JNM TW (Proj.)", "Comm JNG TW (Proj.)", "Overall Comm TW (Proj.)",
+      "Comm JNM TW (Proj.)", "Comm TWIF TW (Proj.)", "Overall Comm TW (Proj.)",
       ...ship,
-      "Comm JNM TW", "Comm JNG TW", "Overall Comm TW",
+      "Comm JNM TW", "Comm TWIF TW", "Overall Comm TW",
     ];
   }
   return [...base, "Comm TW (Proj.)", ...ship, "Comm TW"];
@@ -59,9 +59,9 @@ function monthHeaders(plMode) {
   if (plMode === "overall") {
     return [
       ...base,
-      "Comm JNM TM (Proj.)", "Comm JNG TM (Proj.)", "Overall Comm TM (Proj.)",
+      "Comm JNM TM (Proj.)", "Comm TWIF TM (Proj.)", "Overall Comm TM (Proj.)",
       ...ship,
-      "Comm JNM TM", "Comm JNG TM",
+      "Comm JNM TM", "Comm TWIF TM",
     ];
   }
   return [...base, "Comm TM (Proj.)", ...ship, "Comm TM"];
@@ -103,7 +103,7 @@ function PlSummaryMobileCard({ row, isMonth, plMode, jngShipVal }) {
           {plMode === "overall" ? (
             <>
               <SummaryMetric label={`JNM Comm ${commLabel}`} value={fmtUsd(row.jnmProjComm)} valueClass="text-indigo-600" />
-              <SummaryMetric label={`JNG Comm ${commLabel}`} value={fmtUsd(row.jngProjComm)} valueClass="text-violet-600" />
+              <SummaryMetric label={`TWIF Comm ${commLabel}`} value={fmtUsd(row.jngProjComm)} valueClass="text-violet-600" />
               <SummaryMetric label={`Overall ${commLabel}`} value={fmtUsd(row.overallProjComm)} valueClass="text-indigo-700 font-semibold" />
             </>
           ) : (
@@ -122,7 +122,7 @@ function PlSummaryMobileCard({ row, isMonth, plMode, jngShipVal }) {
           {plMode === "overall" ? (
             <>
               <SummaryMetric label={`JNM Comm ${commLabel}`} value={fmtUsd(row.jnmShipComm)} valueClass="text-indigo-600" />
-              <SummaryMetric label={`JNG Comm ${commLabel}`} value={fmtUsd(jngShipVal(row))} valueClass="text-violet-600" />
+              <SummaryMetric label={`TWIF Comm ${commLabel}`} value={fmtUsd(jngShipVal(row))} valueClass="text-violet-600" />
               {!isMonth && <SummaryMetric label={`Overall ${commLabel}`} value={fmtUsd(row.shipComm)} valueClass="text-indigo-800 font-bold" />}
             </>
           ) : (
@@ -143,7 +143,7 @@ function TotalsBar({ totals, isMonth, plMode }) {
         { label: "Proj. Shipped", value: fmtUsd(totals.projShipped), valueClass: "text-green-700 pl-print-val-green" },
         { label: "Ship. Shipped", value: fmtUsd(totals.shipShipped), valueClass: "text-green-700 pl-print-val-green" },
         { label: `Comm JNM ${commLabel}`, value: fmtUsd(totals.jnmShipComm), valueClass: "text-indigo-600 pl-print-val-indigo" },
-        { label: `Comm JNG ${commLabel}`, value: fmtUsd(totals.jngShipComm), valueClass: "text-violet-600 pl-print-val-violet" },
+        { label: `Comm TWIF ${commLabel}`, value: fmtUsd(totals.jngShipComm), valueClass: "text-violet-600 pl-print-val-violet" },
         { label: `Overall Comm ${commLabel}`, value: fmtUsd(totals.shipComm), valueClass: "text-indigo-800 font-bold pl-print-val-indigo" },
       ]
     : [
@@ -549,7 +549,7 @@ function PlDataSummary({ mode, availableYears, defaultYear }) {
 
   const handleExport = useCallback(() => {
     const dataRows = displayedRows.map(rowToExport);
-    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "JNG";
+    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "TWIF";
     downloadSummaryXlsx(
       [headers, ...dataRows],
       isMonth ? "Monthly Summary" : "Weekly Summary",
@@ -559,7 +559,7 @@ function PlDataSummary({ mode, availableYears, defaultYear }) {
 
   const handleExportPdf = useCallback(() => {
     const dataRows = displayedRows.map(rowToExport);
-    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "JNG";
+    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "TWIF";
     downloadSummaryPdf({
       headers,
       dataRows,

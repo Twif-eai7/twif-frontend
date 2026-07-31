@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-const PREFIX = "jng_pl_data_filters_v1";
+const PREFIX = "twif_pl_data_filters_v1";
 
 function read(screen, key, fallback) {
   try {

@@ -50,7 +50,7 @@ export const useUiStore = create(
           ),
       }),
       {
-        name: 'jng-ui-prefs',
+        name: 'twif-ui-prefs',
         partialize: (state) => ({
           sidebarCollapsed: state.sidebarCollapsed,
           otifYear: state.otifYear,

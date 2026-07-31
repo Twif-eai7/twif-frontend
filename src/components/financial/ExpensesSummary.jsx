@@ -36,7 +36,7 @@ const EXPENSE_FIELDS = [
 const fmtPct = (n) =>
   n == null || n === "" || isNaN(n) ? "" : `${Number(n).toFixed(2)}%`;
 
-const MODE_LABELS = { jng: "P&L JNG", jnm: "P&L JNM", overall: "Overall P&L" };
+const MODE_LABELS = { jng: "P&L TWIF", jnm: "P&L JNM", overall: "Overall P&L" };
 
 function fyMonthRows(fyShort) {
   const startYear = 2000 + parseInt(fyShort, 10) - 1;
@@ -645,14 +645,14 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Summary");
-    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "JNG";
+    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "TWIF";
     const currSlug = showInr ? "INR" : "USD";
     XLSX.writeFile(wb, `Expenses_Summary_${modeSlug}_${currSlug}_FY${year}.xlsx`);
   }, [hasAnyData, monthsData, moneyCell, plMode, year, showInr, inrRate]);
 
   const handleExportPdf = useCallback(() => {
     if (!hasAnyData) return;
-    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "JNG";
+    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "TWIF";
     const [, headerRow2, ...dataRows] = buildExportRows();
     const currSlug = showInr ? "INR" : "USD";
     downloadSummaryPdf({

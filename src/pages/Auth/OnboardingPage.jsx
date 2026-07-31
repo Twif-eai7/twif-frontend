@@ -614,8 +614,8 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
 
         <p className="font-bold text-stone-900 mb-1">BETWEEN</p>
         <p className="mb-3">
-          <strong>J Nitin Global LLP</strong>, having its registered office at 36, Pace City 1, Sector 37,
-          Gurugram, Haryana – 122001, India (hereinafter referred to as <strong>"JNG"</strong>, which
+          <strong>Twif Technologies Private Limited</strong>, having its offices in Bangalore, India,
+          with global headquarters in Singapore (hereinafter referred to as <strong>"Twif"</strong>, which
           expression shall include its successors, affiliates and permitted assigns);
         </p>
 
@@ -628,15 +628,15 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         </p>
         <p className="mb-3">
           (hereinafter referred to as the <strong>"Vendor"</strong>).
-          JNG and the Vendor shall collectively be referred to as the <strong>"Parties"</strong>.
+          Twif and the Vendor shall collectively be referred to as the <strong>"Parties"</strong>.
         </p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">1. PURPOSE</p>
         <p className="mb-3">
           The Vendor shall manufacture, develop, source, sample, inspect, package, or otherwise
-          provide products and services for buyers introduced by JNG. During this relationship, the
+          provide products and services for buyers introduced by Twif. During this relationship, the
           Vendor will have access to confidential commercial, technical and proprietary information
-          belonging to JNG and/or its customers. The purpose of this Agreement is to protect JNG's
+          belonging to Twif and/or its customers. The purpose of this Agreement is to protect Twif's
           intellectual property, trade secrets, customer relationships and proprietary business
           information.
         </p>
@@ -688,7 +688,7 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="mb-1">The Vendor agrees that it shall:</p>
         <ul className="list-disc pl-5 mb-3 space-y-0.5">
           <li>Keep all information strictly confidential.</li>
-          <li>Use information solely for executing JNG business.</li>
+          <li>Use information solely for executing Twif business.</li>
           <li>Not disclose information to any third party.</li>
           <li>Restrict access only to authorized personnel.</li>
           <li>Ensure employees are equally bound by confidentiality obligations.</li>
@@ -700,15 +700,15 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           thereafter, it shall not directly or indirectly:
         </p>
         <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Contact any buyer introduced by JNG.</li>
-          <li>Solicit direct business from any JNG buyer.</li>
+          <li>Contact any buyer introduced by Twif.</li>
+          <li>Solicit direct business from any Twif buyer.</li>
           <li>Quote directly.</li>
           <li>Supply directly.</li>
           <li>Negotiate directly.</li>
           <li>Accept RFQs.</li>
           <li>Participate in tenders.</li>
           <li>Create commercial relationships.</li>
-          <li>Divert business away from JNG introduced clients.</li>
+          <li>Divert business away from Twif introduced clients.</li>
         </ul>
         <p className="mb-1">This restriction applies irrespective of whether:</p>
         <ul className="list-disc pl-5 mb-3 space-y-0.5">
@@ -744,10 +744,10 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="mb-3">Whether production has commenced or not.</p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">6. INTELLECTUAL PROPERTY</p>
-        <p className="mb-1">All Intellectual Property developed through JNG shall remain the exclusive property of:</p>
+        <p className="mb-1">All Intellectual Property developed through Twif shall remain the exclusive property of:</p>
         <ul className="list-disc pl-5 mb-1 space-y-0.5">
           <li>the Buyer; or</li>
-          <li>JNG,</li>
+          <li>Twif,</li>
         </ul>
         <p className="mb-1">including:</p>
         <ul className="list-disc pl-5 mb-1 space-y-0.5">
@@ -767,7 +767,7 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="mb-3">The Vendor shall acquire no ownership rights whatsoever.</p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">7. SOFTWARE &amp; DIGITAL ASSET PROTECTION</p>
-        <p className="mb-1">The Vendor acknowledges that JNG owns proprietary technology platforms including but not limited to:</p>
+        <p className="mb-1">The Vendor acknowledges that Twif owns proprietary technology platforms including but not limited to:</p>
         <ul className="list-disc pl-5 mb-1 space-y-0.5">
           <li>Vendor Portal</li>
           <li>AI Dashboards</li>
@@ -784,10 +784,10 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           <li>Reproduce</li>
           <li>Commercially exploit</li>
         </ul>
-        <p className="mb-3">any software, workflow, interface, database structure or technology belonging to JNG.</p>
+        <p className="mb-3">any software, workflow, interface, database structure or technology belonging to Twif.</p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">8. TRADE SECRET PROTECTION</p>
-        <p className="mb-1">The Vendor acknowledges that JNG possesses valuable trade secrets including:</p>
+        <p className="mb-1">The Vendor acknowledges that Twif possesses valuable trade secrets including:</p>
         <ul className="list-disc pl-5 mb-1 space-y-0.5">
           <li>Supply chain methodologies</li>
           <li>Costing models</li>
@@ -803,8 +803,8 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">9. NON-SOLICITATION OF BUYER/CLIENTS</p>
         <p className="mb-3">
           The Vendor shall not directly or indirectly recruit, solicit, induce, employ or engage, consultant
-          or appoint a representative/agents to approach JNG clients during the business relationship and
-          for without JNG's prior written consent.
+          or appoint a representative/agents to approach Twif clients during the business relationship and
+          for without Twif's prior written consent.
         </p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">10. DATA SECURITY</p>
@@ -831,7 +831,7 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="mb-3">shall immediately be returned or permanently destroyed.</p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">12. BREACH</p>
-        <p className="mb-1">Any breach shall entitle JNG to:</p>
+        <p className="mb-1">Any breach shall entitle Twif to:</p>
         <ul className="list-disc pl-5 mb-3 space-y-0.5">
           <li>Immediate termination.</li>
           <li>Suspension of all orders.</li>
@@ -846,13 +846,13 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="mb-3">
           The Parties shall first attempt to resolve disputes amicably. Failing resolution within
           thirty (30) days, disputes shall be referred to arbitration under the Arbitration and
-          Conciliation Act, 1996. Seat of arbitration: Gurugram, Haryana, India. Language: English. The
+          Conciliation Act, 1996. Seat of arbitration: Bangalore, India. Language: English. The
           arbitration award shall be final and binding.
         </p>
 
         <p className="text-sm font-bold text-stone-900 mt-3 mb-1">14. GOVERNING LAW</p>
         <p className="mb-3">
-          This Agreement shall be governed by the laws of India. Courts at Gurugram, Haryana shall
+          This Agreement shall be governed by the laws of India. Courts at Bangalore, India shall
           have exclusive jurisdiction for interim and enforcement proceedings.
         </p>
 
@@ -880,24 +880,24 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           <p className="font-semibold text-stone-700 mb-2">Buyer Exclusivity &amp; Product Development Protocol</p>
           <p className="mb-2">
             This Schedule forms an integral part of the Master Non-Disclosure, Non-Circumvention &amp;
-            Non-Solicitation Agreement entered into between J Nitin Global LLP ("JNG") and the Vendor.
+            Non-Solicitation Agreement entered into between Twif Technologies Private Limited ("Twif") and the Vendor.
           </p>
 
           <p className="font-bold text-stone-800 mt-2 mb-0.5">1. Buyer Exclusivity</p>
           <p className="mb-0.5">
-            The Vendor acknowledges that all buyers introduced by JNG are proprietary business
-            relationships of JNG. Accordingly, the Vendor shall not, directly or indirectly:
+            The Vendor acknowledges that all buyers introduced by Twif are proprietary business
+            relationships of Twif. Accordingly, the Vendor shall not, directly or indirectly:
           </p>
           <ul className="list-disc pl-4 mb-1 space-y-0.5">
-            <li>Contact, solicit, negotiate, quote, invoice, supply, or conduct business with any buyer introduced by JNG without JNG's prior written approval.</li>
+            <li>Contact, solicit, negotiate, quote, invoice, supply, or conduct business with any buyer introduced by Twif without Twif's prior written approval.</li>
             <li>Accept enquiries, RFQs, or purchase orders directly from such buyers.</li>
             <li>Share buyer contact details with any third party.</li>
-            <li>Encourage buyers to bypass JNG for any commercial transaction.</li>
+            <li>Encourage buyers to bypass Twif for any commercial transaction.</li>
           </ul>
           <p className="mb-2">This restriction shall remain valid during the business relationship and for five (5) years following its termination.</p>
 
           <p className="font-bold text-stone-800 mt-2 mb-0.5">2. Product Development Confidentiality</p>
-          <p className="mb-0.5">All product developments undertaken through JNG shall remain strictly confidential. This includes, but is not limited to:</p>
+          <p className="mb-0.5">All product developments undertaken through Twif shall remain strictly confidential. This includes, but is not limited to:</p>
           <ul className="list-disc pl-4 mb-1 space-y-0.5">
             <li>New product concepts</li>
             <li>Sketches and mood boards</li>
@@ -913,11 +913,11 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
             <li>AI-generated concepts</li>
             <li>Buyer comments and revisions</li>
           </ul>
-          <p className="mb-2">The Vendor shall use such information solely for executing JNG-approved work.</p>
+          <p className="mb-2">The Vendor shall use such information solely for executing Twif-approved work.</p>
 
           <p className="font-bold text-stone-800 mt-2 mb-0.5">3. Communication Protocol</p>
           <p className="mb-0.5">
-            The Vendor shall communicate only through the designated JNG representative unless expressly
+            The Vendor shall communicate only through the designated Twif representative unless expressly
             authorized otherwise in writing. No discussions relating to:
           </p>
           <ul className="list-disc pl-4 mb-1 space-y-0.5">
@@ -929,10 +929,10 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
             <li>Sampling status</li>
             <li>Commercial negotiations</li>
           </ul>
-          <p className="mb-2">shall be conducted directly with the buyer without prior written approval from JNG.</p>
+          <p className="mb-2">shall be conducted directly with the buyer without prior written approval from Twif.</p>
 
           <p className="font-bold text-stone-800 mt-2 mb-0.5">4. Approval Process</p>
-          <p className="mb-0.5">No product shall be treated as approved until JNG communicates written confirmation. The Vendor shall not:</p>
+          <p className="mb-0.5">No product shall be treated as approved until Twif communicates written confirmation. The Vendor shall not:</p>
           <ul className="list-disc pl-4 mb-1 space-y-0.5">
             <li>Commence production.</li>
             <li>Order raw materials.</li>
@@ -941,10 +941,10 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
             <li>Book production capacity.</li>
             <li>Display or publicize products.</li>
           </ul>
-          <p className="mb-2">until final approval has been received through JNG.</p>
+          <p className="mb-2">until final approval has been received through Twif.</p>
 
           <p className="font-bold text-stone-800 mt-2 mb-0.5">5. Product Display Restrictions</p>
-          <p className="mb-0.5">Without prior written approval from JNG, the Vendor shall not:</p>
+          <p className="mb-0.5">Without prior written approval from Twif, the Vendor shall not:</p>
           <ul className="list-disc pl-4 mb-2 space-y-0.5">
             <li>Display buyer-exclusive products in factories or showrooms.</li>
             <li>Exhibit products at fairs or exhibitions.</li>
@@ -956,7 +956,7 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           <p className="font-bold text-stone-800 mt-2 mb-0.5">6. Reproduction Restrictions</p>
           <p className="mb-0.5">
             The Vendor shall not manufacture, reproduce, modify, or offer substantially similar products
-            for any third party where the product has been developed exclusively for a JNG buyer. This
+            for any third party where the product has been developed exclusively for a Twif buyer. This
             restriction applies irrespective of whether:
           </p>
           <ul className="list-disc pl-4 mb-2 space-y-0.5">
@@ -968,8 +968,8 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           <p className="font-bold text-stone-800 mt-2 mb-0.5">7. Tooling, Moulds &amp; Development Assets</p>
           <p className="mb-2">
             Unless otherwise agreed in writing, all tooling, moulds, jigs, fixtures, artwork, CAD files,
-            technical documents, samples, and development assets created specifically for JNG buyers
-            shall remain the exclusive property of the respective buyer and/or JNG. Such assets shall
+            technical documents, samples, and development assets created specifically for Twif buyers
+            shall remain the exclusive property of the respective buyer and/or Twif. Such assets shall
             not be reused for any other customer without prior written consent.
           </p>
 
@@ -978,7 +978,7 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           <ul className="list-disc pl-4 mb-2 space-y-0.5">
             <li>Immediate termination of business.</li>
             <li>Cancellation of current and future orders.</li>
-            <li>Removal of the Vendor from JNG's approved vendor panel.</li>
+            <li>Removal of the Vendor from Twif's approved vendor panel.</li>
             <li>Recovery of damages and legal costs as permitted by applicable law.</li>
             <li>Injunctive relief or other legal remedies available under law.</li>
           </ul>
@@ -986,7 +986,7 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           <p className="font-bold text-stone-800 mt-2 mb-0.5">Vendor Acknowledgement</p>
           <p>
             The Vendor acknowledges that compliance with this Schedule is fundamental to protecting
-            JNG's buyer relationships, intellectual property, product developments, and commercial
+            Twif's buyer relationships, intellectual property, product developments, and commercial
             interests. The Vendor agrees to adhere strictly to these obligations throughout the
             business relationship.
           </p>

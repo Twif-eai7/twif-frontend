@@ -5,7 +5,7 @@ import {
   getMonthWeekInfo, getMonthWeekRange,
 } from "../../utils/plDataHelpers";
 
-const MODE_SUFFIX = { jng: "JNG", jnm: "JNM", overall: "Overall" };
+const MODE_SUFFIX = { jng: "TWIF", jnm: "JNM", overall: "Overall" };
 
 /** Commission amount for a set of POs, respecting the page's P&L mode (JNG/JNM/Overall) —
  * same mode-switching logic ExpensesSummary.jsx uses for the main Summary table. */
@@ -321,7 +321,7 @@ export default function MisDivision({ year, months, rows, openRows, buyerRateMap
   const [selectedBuyers, setSelectedBuyers] = useState([]);
 
   const metricRows = useMemo(() => {
-    const suffix = MODE_SUFFIX[plMode] || "JNG";
+    const suffix = MODE_SUFFIX[plMode] || "TWIF";
     return ROWS_BASE.map((r) => ({ ...r, label: r.label.replace("{MODE}", suffix) }));
   }, [plMode]);
   const [selectedDivHead, setSelectedDivHead] = useState("");

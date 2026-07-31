@@ -214,7 +214,7 @@ function Sidebar({ activeId, scrollTo }) {
 function S1Login() {
   return (
     <Section id="s-login" num="1" title="Logging In & Access Levels">
-      <p>Access the Merchant Portal through the JNG website. You must have an approved merchant account to log in. New accounts are placed under review until verified by an administrator.</p>
+      <p>Access the Merchant Portal through the Twif website. You must have an approved merchant account to log in. New accounts are placed under review until verified by an administrator.</p>
       <Subsection title="Account States">
         <ManualTable
           headers={["State", "What You See"]}
@@ -408,8 +408,8 @@ function S8Logistics() {
 function S9HR() {
   return (
     <Section id="s-hr" num="9" title="HR One Portal">
-      <p>This is a direct link to the <strong>HROne</strong> HR management platform used by JNG. Clicking <strong>Access HR One</strong> opens the HROne app in a new tab using your existing HROne credentials.</p>
-      <Note><strong className="text-neutral-900">Note:</strong> Your JNG Website login and your HROne login are separate. Contact HR if you need your HROne credentials.</Note>
+      <p>This is a direct link to the <strong>HROne</strong> HR management platform used by Twif. Clicking <strong>Access HR One</strong> opens the HROne app in a new tab using your existing HROne credentials.</p>
+      <Note><strong className="text-neutral-900">Note:</strong> Your Twif Website login and your HROne login are separate. Contact HR if you need your HROne credentials.</Note>
     </Section>
   );
 }
@@ -499,7 +499,7 @@ export default function UserManualPage() {
               Merchant Portal — User Manual
             </h1>
             <p className="text-[11px] font-mono text-neutral-500 tracking-widest uppercase m-0">
-              JNG Website · Internal Reference · April 2026
+              Twif Website · Internal Reference · April 2026
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -545,7 +545,7 @@ export default function UserManualPage() {
 
             {/* Footer */}
             <div className="border-t-2 border-neutral-900 pt-6 mt-4 flex items-center justify-between">
-              <p className="text-xs font-mono text-neutral-400 uppercase tracking-widest m-0">JNG Website · Internal Reference Guide</p>
+              <p className="text-xs font-mono text-neutral-400 uppercase tracking-widest m-0">Twif Website · Internal Reference Guide</p>
               <p className="text-xs font-mono text-neutral-400 m-0">Last updated April 2026</p>
             </div>
           </div>

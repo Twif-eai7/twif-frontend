@@ -57,7 +57,7 @@ export async function exportAuditPdf(audit, { logoUrl } = {}) {
 
   const year  = audit.assessment_date ? new Date(audit.assessment_date).getFullYear() : new Date().getFullYear()
   const revNo = String((audit.revision_no ?? 0) + 1).padStart(2, '0')
-  const refBase = `JNG-QA-AUD-${year}-001-REV`
+  const refBase = `TWIF-QA-AUD-${year}-001-REV`
   const midY  = 8 + HH / 2 + 1.5
 
   doc.setDrawColor(180, 180, 180).setLineWidth(0.35)
@@ -72,7 +72,7 @@ export async function exportAuditPdf(audit, { logoUrl } = {}) {
   }
   if (!logoBase64) {
     doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(30, 30, 30)
-    doc.text('JNG', M + LOGO / 2, midY, { align: 'center' })
+    doc.text('TWIF', M + LOGO / 2, midY, { align: 'center' })
   }
 
   // Title cell

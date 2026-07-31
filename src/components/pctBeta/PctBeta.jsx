@@ -46,7 +46,7 @@ function GlobalTopbar() {
     <div className="flex items-center justify-between px-5 h-12 bg-[#0a1628] border-b border-white/10 flex-shrink-0 md:px-5">
       <div className="flex items-center gap-3">
         <LogoMark size={32} dark={false} />
-        <span className="text-white text-[15px] font-bold tracking-[-.2px]">JNG Platform</span>
+        <span className="text-white text-[15px] font-bold tracking-[-.2px]">Twif Platform</span>
       </div>
 
       <div className="relative" ref={wrapRef}>

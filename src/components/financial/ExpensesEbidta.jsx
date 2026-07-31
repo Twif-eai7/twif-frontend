@@ -31,7 +31,7 @@ const fmtUsd = (n) =>
 const fmtPct = (n) =>
   n == null || n === "" || isNaN(n) ? "—" : `${Number(n).toFixed(2)}%`;
 
-const MODE_LABELS = { jng: "P&L JNG", jnm: "P&L JNM", overall: "Overall P&L" };
+const MODE_LABELS = { jng: "P&L TWIF", jnm: "P&L JNM", overall: "Overall P&L" };
 
 function sumRows(rows, key) {
   return rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
@@ -93,7 +93,7 @@ export default function ExpensesEbidta({ availableYears = ["26", "27"], defaultY
     ? "Overall P&L — monthly expenses & EBIDTA"
     : plMode === "jnm"
     ? "P&L JNM — monthly expenses & EBIDTA"
-    : "P&L JNG — monthly expenses & EBIDTA";
+    : "P&L TWIF — monthly expenses & EBIDTA";
 
   useEffect(() => {
     if (!hasJnmPlAccess) return;
@@ -154,7 +154,7 @@ export default function ExpensesEbidta({ availableYears = ["26", "27"], defaultY
 
   const handleExport = useCallback(() => {
     if (!hasAnyData) return;
-    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "JNG";
+    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "TWIF";
     const dataRows = months
       .filter((m) => dataMap[m.key])
       .map((m) => {
@@ -185,7 +185,7 @@ export default function ExpensesEbidta({ availableYears = ["26", "27"], defaultY
 
   const handleExportPdf = useCallback(() => {
     if (!hasAnyData) return;
-    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "JNG";
+    const modeSlug = plMode === "overall" ? "Overall" : plMode === "jnm" ? "JNM" : "TWIF";
     const dataRows = months
       .filter((m) => dataMap[m.key])
       .map((m) => {

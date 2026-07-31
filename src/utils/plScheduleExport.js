@@ -72,10 +72,10 @@ function buildPeriodSheet(wk, view, plMode, { getCommPct, getJngCommPct, getJnmC
   const isOverall = plMode === "overall";
   const commLabel = view === "week" ? "Commission TW ($)" : "Commission TM ($)";
   const PROJ_HDR = isOverall
-    ? ["Customer", "Vendor", "PO No.", "SKUs", "Ord Qty", "Shp Qty", "Bal Qty", "Order Val ($)", "Shipped ($)", "Shp Date", "Balance ($)", "Comm JNM %", "Comm JNG %", "Comm JNM $", "Comm JNG $", "Overall Comm", "Target Shipped Date", "Status"]
+    ? ["Customer", "Vendor", "PO No.", "SKUs", "Ord Qty", "Shp Qty", "Bal Qty", "Order Val ($)", "Shipped ($)", "Shp Date", "Balance ($)", "Comm JNM %", "Comm TWIF %", "Comm JNM $", "Comm TWIF $", "Overall Comm", "Target Shipped Date", "Status"]
     : ["Customer", "Vendor", "PO No.", "SKUs", "Ord Qty", "Shp Qty", "Bal Qty", "Order Val ($)", "Shipped ($)", "Shp Date", "Balance ($)", "Commission %", commLabel, "Target Shipped Date", "Status"];
   const SHIP_HDR = isOverall
-    ? ["Customer", "Vendor", "PO No.", "SKUs", "Ord Qty", "Shp Qty", "Bal Qty", "Order Val ($)", "Shipped ($)", "Shp Date", "Balance ($)", "Comm JNM %", "Comm JNG %", "Comm JNM $", "Comm JNG $", "Overall Comm", "Status"]
+    ? ["Customer", "Vendor", "PO No.", "SKUs", "Ord Qty", "Shp Qty", "Bal Qty", "Order Val ($)", "Shipped ($)", "Shp Date", "Balance ($)", "Comm JNM %", "Comm TWIF %", "Comm JNM $", "Comm TWIF $", "Overall Comm", "Status"]
     : ["Customer", "Vendor", "PO No.", "SKUs", "Ord Qty", "Shp Qty", "Bal Qty", "Order Val ($)", "Shipped ($)", "Shp Date", "Balance ($)", "Commission %", commLabel, "Status"];
   const NUM_COLS = PROJ_HDR.length;
 

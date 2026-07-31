@@ -1,7 +1,7 @@
 import { useJnmPlAccess } from "../../hooks/useJnmPlAccess";
 
 const MODES = [
-  ["jng", "P&L JNG", false],
+  ["jng", "P&L TWIF", false],
   ["jnm", "P&L JNM", true],
   ["overall", "Overall P&L", true],
 ];

@@ -18,7 +18,7 @@ const NAV_ITEMS = [
 ];
 
 const HERO_META = [
-  { label: "Document No.", value: "JNG/QMS/QM/001" },
+  { label: "Document No.", value: "TWIF/QMS/QM/001" },
   { label: "Revision",     value: "00"             },
   { label: "Effective",    value: "1 Oct 2025"     },
 ];
@@ -178,7 +178,7 @@ export default function QualityManual() {
             Quality Manual
           </h1>
           <p className="text-base text-white/70 mb-7 font-normal">
-            Jnitin Global · Buying House &amp; Sourcing Solutions
+            Twif Technologies · Buying House &amp; Sourcing Solutions
           </p>
 
           {/* Meta strip */}
@@ -253,7 +253,7 @@ export default function QualityManual() {
             <SectionHead number="01" title="Purpose" />
             <p className="text-sm text-gray-500 leading-relaxed">
               The purpose of this Quality Manual is to define and describe the Quality Management
-              System (QMS) implemented by Jnitin Global, a Buying House engaged in sourcing, vendor
+              System (QMS) implemented by Twif Technologies, a Buying House engaged in sourcing, vendor
               management, quality assurance, and shipment coordination for international and domestic
               customers. This manual ensures compliance with ISO 9001:2015 and provides a framework
               for consistent quality performance.
@@ -282,7 +282,7 @@ export default function QualityManual() {
           <section id="qm-profile" data-qm-section className="mb-12 scroll-mt-6">
             <SectionHead number="03" title="Company Profile" />
             <p className="text-sm text-gray-500 leading-relaxed mb-4">
-              Jnitin Global, established in Gurugram, Haryana, serves as a professional buying house
+              Twif Technologies, headquartered in Singapore and Bangalore, serves as a professional buying house
               connecting international buyers with verified Indian manufacturers. The company
               specialises in end-to-end sourcing solutions — from vendor selection and sampling to
               production follow-up, inspection, and shipment coordination.
@@ -304,7 +304,7 @@ export default function QualityManual() {
             <blockquote className="border-l-[3px] border-[#1a1a1a] bg-gray-100 rounded-r-lg
                                    px-6 py-5 max-w-2xl space-y-3">
               <p className="text-sm text-[#333] leading-relaxed">
-                At Jnitin Global, we are committed to providing professional sourcing, quality
+                At Twif Technologies, we are committed to providing professional sourcing, quality
                 assurance, and compliance services that consistently meet our customers' requirements
                 and expectations.
               </p>
@@ -465,9 +465,9 @@ export default function QualityManual() {
           {/* Document footer */}
           <div className="flex items-center gap-2 pt-8 mt-12 border-t border-gray-200
                           text-[11px] text-gray-400 flex-wrap">
-            <span>JNG-QMS-QM-2025-001-REV00</span>
+            <span>TWIF-QMS-QM-2025-001-REV00</span>
             <span>·</span>
-            <span>Jnitin Global</span>
+            <span>Twif Technologies</span>
             <span>·</span>
             <span>Effective 1 Oct 2025</span>
           </div>

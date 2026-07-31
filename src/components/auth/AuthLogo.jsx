@@ -18,7 +18,7 @@ export default function AuthLogo({ suffix, label }) {
         className="text-stone-900 text-xl"
         style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
       >
-        {label || `JNG Portal${suffix ? ` - ${suffix}` : ''}`}
+        {label || `Twif Portal${suffix ? ` - ${suffix}` : ''}`}
       </span>
     </button>
   )

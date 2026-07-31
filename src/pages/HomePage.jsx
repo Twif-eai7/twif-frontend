@@ -58,7 +58,7 @@ export default function HomePage() {
           <button onClick={() => navigate('/')} className="flex items-center gap-2.5 hover:opacity-75 transition-opacity">
             <LogoMark size={28} />
             <span className="text-stone-900 text-lg hidden sm:block" style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}>
-              JNG Portal
+              Twif Portal
             </span>
           </button>
 
@@ -268,7 +268,7 @@ export default function HomePage() {
         <div className="max-w-5xl mx-auto flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-2.5">
             <LogoMark size={22} />
-            <span className="text-sm text-stone-400">© 2025 JNG Portal. All rights reserved.</span>
+            <span className="text-sm text-stone-400">© 2026 Twif Portal. All rights reserved.</span>
           </div>
           <div className="flex gap-6">
             {['Privacy', 'Terms', 'Support'].map(l => (
