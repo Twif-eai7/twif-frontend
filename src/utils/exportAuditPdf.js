@@ -3,7 +3,6 @@ const AUDIT_TYPE_LABEL = {
   'social-compliance': 'Social Compliance',
   smeta: 'SMETA', bsci: 'BSCI', sa8000: 'SA 8000', ics: 'ICS',
 }
-const LOGO_URL = 'https://cdn.shopify.com/s/files/1/0494/0922/8958/files/logo.png?v=1614315516'
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -24,10 +23,9 @@ async function fetchAsBase64(url) {
 }
 
 export async function exportAuditPdf(audit, { logoUrl } = {}) {
-  const resolvedLogo = logoUrl ?? LOGO_URL
   const [[{ default: jsPDF }], logoBase64] = await Promise.all([
     Promise.all([import('jspdf'), import('jspdf-autotable')]),
-    fetchAsBase64(resolvedLogo),
+    logoUrl ? fetchAsBase64(logoUrl) : Promise.resolve(null),
   ])
 
   const g   = audit.audit_general_info       ?? {}

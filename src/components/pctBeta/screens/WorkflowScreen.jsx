@@ -41,7 +41,7 @@ function SkuStageCard({ row }) {
   const vendor = row.vendor || ''
   const risk = row.risk || 'Low'
   const stage = row.stage || ''
-  const imageUrl = sd.imageUrl || (sku === 'SKU-DEMO-01' ? 'https://cdn.shopify.com/s/files/1/0494/0922/8958/files/demo-po-test-image.png?v=1777452123' : '')
+  const imageUrl = sd.imageUrl || ''
   const riskCls = risk === 'High' ? 'bg-red-100 text-red-700' : risk === 'Medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
   const hasAttrs = sd.material || sd.dimensions || sd.finish || sd.weight || sd.title
 

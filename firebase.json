@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "warm-physics-470205-e0",
+    "site": "twif-frontend",
     "public": "dist",
     "ignore": [
       "firebase.json",

@@ -28,7 +28,7 @@ function CompanyStrip() {
             <span className="block text-[10px] font-semibold uppercase tracking-widest text-gray-400 leading-none mb-0.5">
               From
             </span>
-            <span className="block text-sm font-semibold text-gray-900">JNITIN GLOBAL LLP</span>
+            <span className="block text-sm font-semibold text-gray-900">TWIF TECH LLP</span>
           </div>
         </div>
         <div className="flex items-center gap-2.5">
@@ -45,7 +45,7 @@ function CompanyStrip() {
             ['Address', 'Plot No.36, Sector 37, Pace city-1, Gurgaon, Haryana-122001, INDIA'],
             ['GSTIN',   '06AAPFJ1459D1ZD'],
             ['PAN / CIN', 'AAPFJ1459D / AAO-8540'],
-            ['Email',   'accounts@jnitinglobal.com'],
+            ['Email',   'hi@eai7.com'],
           ].map(([label, value]) => (
             <div key={label}>
               <span className="block text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-0.5">
@@ -91,7 +91,7 @@ function BankStrip() {
       {open && (
         <div className="px-7 pb-4 grid grid-cols-2 gap-x-6 gap-y-2.5 animate-fade-in">
           {[
-            ['Beneficiary', 'JNITIN GLOBAL LLP'],
+            ['Beneficiary', 'TWIF TECH LLP'],
             ['IFSC / SWIFT', 'KKBK0000261 / KKBKINBBCPC'],
             ['Bank Address', 'JMD Regent Square, Gurgaon'],
             ['Intermediary', 'Citi Bank NA · CITI US 33 · Nostro: 36317907'],
@@ -173,7 +173,7 @@ export default function Invoice( ) {
           </div>
           <div>
             <h2 className="text-lg font-bold text-gray-900 leading-tight">Create Service Invoice</h2>
-            <p className="text-xs text-gray-400 mt-0.5">JNITIN GLOBAL LLP · Consultancy Invoice</p>
+            <p className="text-xs text-gray-400 mt-0.5">TWIF TECH LLP · Consultancy Invoice</p>
           </div>
         </div>
 

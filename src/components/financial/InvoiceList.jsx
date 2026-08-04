@@ -154,7 +154,7 @@ export default function InvoiceList() {
           </div>
           <div>
             <h2 className="text-[17px] font-bold text-gray-900 leading-tight">Consultancy Invoices</h2>
-            <p className="text-xs text-gray-400 mt-0.5">JNITIN GLOBAL LLP · All issued invoices</p>
+            <p className="text-xs text-gray-400 mt-0.5">TWIF TECH LLP · All issued invoices</p>
           </div>
         </div>
 
