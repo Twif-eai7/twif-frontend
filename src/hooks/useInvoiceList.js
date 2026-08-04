@@ -18,7 +18,7 @@ export function formatAmount(num, currency = 'USD') {
 }
 
 export function getPdfUrl(path) {
-  return `https://sdbejwjuaqcmgvaomjxb.supabase.co/storage/v1/object/public/invoice-documents/${path}`;
+  return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/invoice-documents/${path}`;
 }
 
 export function useInvoiceList() {

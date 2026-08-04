@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { useProfileStore } from '../stores/profileStore';
 
-const SUPABASE_URL = 'https://sdbejwjuaqcmgvaomjxb.supabase.co';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const BUCKET = 'POFY27';
 const BASE = import.meta.env.VITE_BACKEND_URL;
 

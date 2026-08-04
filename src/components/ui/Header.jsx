@@ -163,7 +163,7 @@ export default function Header({ dept, profile, onLogout }) {
 
             <button
               type="button"
-              onClick={() => { window.location.href = 'https://www.jnitin.com/' }}
+              onClick={() => { window.location.href = 'https://www.eai7.com/' }}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-orange-500 shadow-sm hover:bg-orange-500 hover:text-white transition-colors"
             >
               Home
