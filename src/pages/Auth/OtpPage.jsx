@@ -6,6 +6,8 @@ import { OTPInput, Alert, Spinner } from '../../components/ui'
 import { useOTPTimer } from '../../hooks/useOtpTimer'
 import { usePortalUser } from '../../hooks/usePortalUser'
 
+// Must match Authentication → Email → OTP Length in the Twif Supabase project.
+const OTP_LENGTH = 8
 
 export default function OTPPage({ forcedRole: routeForcedRole }) {
   const navigate = useNavigate()
@@ -124,7 +126,7 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
   const busy = verifying || portalLoading
 
   return (
-    <AuthShell>
+    <AuthShell maxWidth="max-w-lg">
       <AuthLogo suffix={logoSuffix} label={logoLabel} />
 
       <h1
@@ -134,7 +136,7 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
         Check your email
       </h1>
       <p className="text-sm text-stone-500 leading-relaxed mb-6">
-        We sent a 6-digit code to{' '}
+        We sent an {OTP_LENGTH}-digit code to{' '}
         <strong className="text-stone-800 font-medium">{email}</strong>.
         Enter it below to {mode === 'signup' ? 'continue' : 'sign in'}.
       </p>
@@ -143,7 +145,7 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
         <Alert type="error">{error || resendError}</Alert>
       )}
 
-      <OTPInput length={6} onComplete={handleComplete} hasError={!!error} disabled={busy} />
+      <OTPInput length={OTP_LENGTH} onComplete={handleComplete} hasError={!!error} disabled={busy} />
 
       {busy && (
         <div className="flex justify-center mb-4">

@@ -46,10 +46,11 @@ export function useEmailAuth(mode, returnUrl, forcedRole, otpPath = '/verify-otp
       })
 
       if (otpError) {
+        const otpMsg = typeof otpError.message === 'string' ? otpError.message : ''
         if (
           mode === 'login' &&
-          (otpError.message.toLowerCase().includes('not found') ||
-            otpError.message.toLowerCase().includes('signups not allowed'))
+          (otpMsg.toLowerCase().includes('not found') ||
+            otpMsg.toLowerCase().includes('signups not allowed'))
         ) {
           return setError('No account found with that email. Try requesting access instead.')
         }
@@ -59,7 +60,14 @@ export function useEmailAuth(mode, returnUrl, forcedRole, otpPath = '/verify-otp
       navigate(otpPath, { state: { email: normalised, mode, returnUrl, forcedRole }, replace: true })
 
     } catch (err) {
-      setError(err.message || 'Something went wrong. Please try again.')
+      const raw = typeof err?.message === 'string' ? err.message.trim() : ''
+      // Supabase sometimes returns an empty JSON body ({}) when SMTP/email send fails
+      const unusable = !raw || raw === '{}' || raw === '[object Object]'
+      setError(
+        unusable
+          ? 'Could not send the sign-in email. Check Supabase Auth SMTP (Resend) settings and try again.'
+          : raw
+      )
     } finally {
       setLoading(false)
     }

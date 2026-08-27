@@ -1,7 +1,5 @@
-// import PctBeta from '../components/pctBeta/PctBeta'
-import ComingSoon from './Dashboard/ComingSoon'
+import PctBeta from '../components/pctBeta/PctBeta'
 
 export default function PctBetaPage() {
-  return <ComingSoon />
-  // return <PctBeta />
+  return <PctBeta />
 }
