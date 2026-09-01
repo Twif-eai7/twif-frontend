@@ -1,29 +1,23 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { AuthShell, AuthLogo } from '../../components/auth'
-import { Button, Input, Alert } from '../../components/ui'
+import { AuthSplitLayout, AuthEmailField, AuthGradientButton } from '../../components/auth'
+import { Alert } from '../../components/ui'
 import { useEmailAuth } from '../../hooks/useEmailAuth'
 import { useAuth } from '../../hooks/useAuth'
 import { useProfileStore } from '../../stores/profileStore'
 
 const MODES = {
   login: {
-    tab: 'Sign in',
-    heading: 'Welcome back',
-    subtitle: "Enter your email and we'll send you a sign-in code.",
-    emailLabel: 'Email address',
-    emailHint: '',
-    submitLabel: 'Continue with email',
+    heading: 'Sign in',
+    emailPlaceholder: 'Email or ID',
+    submitLabel: 'Sign in',
     footerQuestion: "Don't have an account?",
     footerAction: 'Request access',
     footerTarget: 'signup',
   },
   signup: {
-    tab: 'Request access',
     heading: 'Request access',
-    subtitle: "Enter your work email to get started. We'll verify it before setting up your account.",
-    emailLabel: 'Work email',
-    emailHint: "Use your company email — it's used to find your organisation.",
+    emailPlaceholder: 'Work email',
     submitLabel: 'Continue',
     footerQuestion: 'Already have an account?',
     footerAction: 'Sign in',
@@ -48,25 +42,19 @@ export default function AuthPage({ forcedRole }) {
     if (authLoading || !session) return
     if (!profileFetched) return
 
-    // Honour return_url if present (e.g. from PLM invite accept flow)
     const returnUrl = searchParams.get('return_url')
     if (returnUrl) {
       navigate(returnUrl, { replace: true })
       return
     }
 
-    // Vendor entrance uses its own dedicated onboarding route so the role
-    // survives even if state gets dropped along the way (e.g. a stale
-    // session bypassing the normal OTP → onboarding chain).
     const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
 
-    // Not yet submitted onboarding form
     if (!portalUser || !portalUser.onboarding_completed) {
       navigate(onboardingPath, { state: { email: user?.email, forcedRole }, replace: true })
       return
     }
 
-    // Submitted but pending org approval
     if (!orgMembership) {
       navigate(onboardingPath, { state: { email: user?.email, pendingReview: true, forcedRole }, replace: true })
       return
@@ -86,8 +74,6 @@ export default function AuthPage({ forcedRole }) {
   }, [session, authLoading, profileFetched, portalUser, orgMembership, user, navigate, searchParams, forcedRole])
 
   const returnUrl = searchParams.get('return_url')
-  // Vendor entrance gets its own dedicated OTP route (see App.jsx) so the
-  // role is baked into the URL instead of relying on history state alone.
   const otpPath = forcedRole === 'supplier' ? '/auth/vendor/verify-otp' : '/verify-otp'
   const { submit, loading, error, clearError } = useEmailAuth(mode, returnUrl, forcedRole, otpPath)
 
@@ -110,63 +96,59 @@ export default function AuthPage({ forcedRole }) {
   }
 
   const roleLabel = forcedRole === 'buyer' ? 'Buyer' : forcedRole === 'supplier' ? 'Vendor' : null
-  const logoSuffix = roleLabel && (mode === 'signup' ? `New ${roleLabel} Registration` : roleLabel)
+  const panelHeading = roleLabel && mode === 'signup'
+    ? `New ${roleLabel} registration`
+    : roleLabel || null
 
   return (
-    <AuthShell>
-      <AuthLogo suffix={logoSuffix || undefined} />
-
-      {/* Form — fades when switching mode */}
+    <AuthSplitLayout mode={mode}>
       <div
         className="transition-opacity duration-150"
         style={{ opacity: animating ? 0 : 1 }}
       >
-        <h1
-          className="text-stone-900 mb-1.5"
-          style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontSize: 22, fontWeight: 400 }}
-        >
+        <h2 className="text-center text-sm font-bold tracking-[0.18em] text-[#4d68f0] uppercase mb-8">
           {config.heading}
-        </h1>
-        <p className="text-sm text-stone-500 leading-relaxed mb-6">
-          {config.subtitle}
-        </p>
+        </h2>
+
+        {panelHeading && (
+          <p className="text-center text-xs text-[#64748b] -mt-5 mb-6">{panelHeading}</p>
+        )}
 
         {error && <Alert type="error">{error}</Alert>}
 
-        <form onSubmit={handleSubmit} noValidate>
-          <Input
-            label={config.emailLabel}
-            required
-            type="email"
-            placeholder="you@company.com"
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
+          <AuthEmailField
             value={email}
-            hint={config.emailHint}
-            onChange={e => { setEmail(e.target.value); clearError() }}
-            autoComplete="email"
+            onChange={(e) => { setEmail(e.target.value); clearError() }}
+            placeholder={config.emailPlaceholder}
             autoFocus
+            disabled={loading}
           />
-          <Button
-            type="submit"
-            variant="primary"
-            fullWidth
-            loading={loading}
-            className="mt-1 py-3"
-          >
-            {config.submitLabel}
-          </Button>
+
+          <p className="text-xs text-[#94a3b8] px-1">
+            {mode === 'login'
+              ? "We'll email you a one-time sign-in code — no password needed."
+              : "Use your company email — we'll verify it before setting up your account."}
+          </p>
+
+          <div className="pt-2">
+            <AuthGradientButton loading={loading}>
+              {config.submitLabel}
+            </AuthGradientButton>
+          </div>
         </form>
 
-        <p className="text-center text-sm text-stone-500 mt-6">
+        <p className="text-center text-sm text-[#64748b] mt-6">
           {config.footerQuestion}{' '}
           <button
             type="button"
             onClick={() => switchMode(config.footerTarget)}
-            className="text-stone-900 font-medium border-b border-stone-300 hover:border-stone-900 pb-px transition-colors"
+            className="text-[#4d68f0] font-medium hover:underline"
           >
             {config.footerAction}
           </button>
         </p>
       </div>
-    </AuthShell>
+    </AuthSplitLayout>
   )
 }

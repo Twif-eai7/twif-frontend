@@ -1,4 +1,7 @@
 export { default as AuthShell } from './AuthShell'
 export { default as AuthLogo } from './AuthLogo'
+export { default as AuthSplitLayout } from './AuthSplitLayout'
+export { default as AuthEmailField } from './AuthEmailField'
+export { default as AuthGradientButton } from './AuthGradientButton'
 export { default as StepIndicator } from './StepIndicator'
 export { default as OrgMatchCard } from './OrgMatchCard'
