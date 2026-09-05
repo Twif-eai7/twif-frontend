@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { usePlmStore } from '../stores/plmStore'
 import { useOrgsInit } from '../stores/orgsStore'
 import { usePLMCatalog } from '../hooks/usePLMCatalog'
-import { useProfileHeader, useRole } from '../stores/profileStore'
+import { useProfileHeader } from '../stores/profileStore'
 import VideoCallOverlay from '../components/plm/VideoCallOverlay'
 import { Spinner } from '../components/ui'
 
@@ -16,9 +16,11 @@ export default function PLMVedeeoPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const workspaceId = params.get('workspace')
+  const inviteId = params.get('invite')
 
   const openWorkspace       = usePlmStore(s => s.openWorkspace)
   const startVideoCall      = usePlmStore(s => s.startVideoCall)
+  const acceptVideoCall     = usePlmStore(s => s.acceptVideoCall)
   const endVideoCall        = usePlmStore(s => s.endVideoCall)
   const activeVideoCall     = usePlmStore(s => s.activeVideoCall)
   const videoCallConnecting = usePlmStore(s => s.videoCallConnecting)
@@ -36,20 +38,24 @@ export default function PLMVedeeoPage() {
 
   useEffect(() => {
     if (!workspaceId || !memberId) return
-    if (activeVideoCall?.workspaceId === workspaceId && activeVideoCall.roomUrl) return
+    if (activeVideoCall?.workspaceId === workspaceId && activeVideoCall.joinUrl) return
     if (videoCallConnecting === workspaceId) return
     if (startedRef.current) return
 
     startedRef.current = true
-    startVideoCall(workspaceId, memberId, userName).catch((err) => {
+    const run = inviteId
+      ? acceptVideoCall(workspaceId, memberId, userName, inviteId)
+      : startVideoCall(workspaceId, memberId, userName)
+
+    run.catch((err) => {
       startedRef.current = false
       alert('Could not start video call: ' + err.message)
       navigate(`/plm?workspace=${workspaceId}`, { replace: true })
     })
   }, [
-    workspaceId, memberId, userName,
+    workspaceId, memberId, userName, inviteId,
     activeVideoCall, videoCallConnecting,
-    startVideoCall, navigate,
+    startVideoCall, acceptVideoCall, navigate,
   ])
 
   const handleLeave = async () => {
@@ -67,7 +73,7 @@ export default function PLMVedeeoPage() {
     )
   }
 
-  const isReady = activeVideoCall?.workspaceId === workspaceId && activeVideoCall.roomUrl
+  const isReady = activeVideoCall?.workspaceId === workspaceId && activeVideoCall.joinUrl
   const isConnecting = videoCallConnecting === workspaceId
 
   if (isReady) {
@@ -77,8 +83,7 @@ export default function PLMVedeeoPage() {
         workspaceId={workspaceId}
         memberId={memberId}
         userName={userName}
-        roomUrl={activeVideoCall.roomUrl}
-        token={activeVideoCall.token}
+        joinUrl={activeVideoCall.joinUrl}
         onLeave={handleLeave}
       />
     )
@@ -88,7 +93,7 @@ export default function PLMVedeeoPage() {
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-[#0a0a09]">
       <Spinner light size="w-6 h-6" />
       <p className="text-[11px] font-bold uppercase tracking-[.1em] text-white/50">
-        {isConnecting ? 'Connecting to video call…' : 'Starting video call…'}
+        {isConnecting ? 'Connecting to video call…' : inviteId ? 'Joining video call…' : 'Starting video call…'}
       </p>
     </div>
   )

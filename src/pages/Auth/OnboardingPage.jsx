@@ -2,14 +2,18 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, supabaseConfigMessage } from '../../lib/supabase'
 import { AuthShell, AuthLogo, OrgMatchCard } from '../../components/auth'
-import { Button, Input, Select, Alert, Spinner } from '../../components/ui'
+import { Button, Input, Select, Alert, Spinner, PhoneField, OTPInput } from '../../components/ui'
+import { useOTPTimer } from '../../hooks/useOtpTimer'
 import SignaturePad from '../../components/shared/SignaturePad'
+import NdaAgreementText from '../../components/shared/NdaAgreementText'
 import { MODE_TO_STORAGE } from '../../lib/signatureMode'
 import { useOrgLookup } from '../../hooks/useOrgLookup'
 import { usePortalUser } from '../../hooks/usePortalUser'
 import { useProfileStore } from '../../stores/profileStore'
 import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
+import { formatErrorFor, GSTIN_RE, INDIA_PIN_RE } from '../../utils/fieldFormats'
+import ApplicationPreviewModal from './ApplicationPreviewModal'
 
 // ─── Constants ────────────────────────────────────────────────
 const COUNTRIES = [
@@ -32,6 +36,23 @@ const FALLBACK_CATEGORIES = [
   'Home Decor', 'Furniture', 'Textile / Bed Linens', 'Lighting',
   'Kitchenware', 'Outdoor / Garden', 'Seasonal / Gifting', 'Hard Goods', 'Apparel',
 ].map((name, i) => ({ id: String(i), name }))
+
+// Synthetic "Others" option — when picked, the user types a free-text category.
+const OTHER_CAT_ID = '__other__'
+
+// GSTIN state code (first 2 digits) → state name. Used for the free, no-API
+// fallback when the full GST lookup isn't configured.
+const GST_STATE_CODES = {
+  '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
+  '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh',
+  '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur',
+  '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal',
+  '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
+  '25': 'Daman and Diu', '26': 'Dadra and Nagar Haveli and Daman and Diu', '27': 'Maharashtra',
+  '28': 'Andhra Pradesh', '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala',
+  '33': 'Tamil Nadu', '34': 'Puducherry', '35': 'Andaman and Nicobar Islands', '36': 'Telangana',
+  '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory',
+}
 
 // ─── Sub-step: Role selection ──────────────────────────────────
 function RoleStep({ role, onSelect, onContinue, companyName, onCompanyName, orgEmail, onOrgEmail, onBack, error }) {
@@ -303,11 +324,24 @@ const SUPPLIER_TABS = [
   { key: 'agreement', step: 3, label: 'Agreement' },
 ]
 
+// Nearest scrollable ancestor — the tab body clips the dropdown otherwise.
+function getScrollParent(node) {
+  let el = node?.parentElement
+  while (el) {
+    const oy = getComputedStyle(el).overflowY
+    if (oy === 'auto' || oy === 'scroll') return el
+    el = el.parentElement
+  }
+  return null
+}
+
 // ─── Searchable multi-select for product categories ────────────
 function CategoryMultiSelect({ categories, selectedCats, toggleCat }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [dropUp, setDropUp] = useState(false)
   const containerRef = useRef(null)
+  const menuRef = useRef(null)
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -316,6 +350,25 @@ function CategoryMultiSelect({ categories, selectedCats, toggleCat }) {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Decide flip direction against the clipping scroll container, then make
+  // sure the menu is actually in view once it has rendered.
+  function openMenu() {
+    const el = containerRef.current
+    const scroller = getScrollParent(el)
+    if (el && scroller) {
+      const r = el.getBoundingClientRect()
+      const s = scroller.getBoundingClientRect()
+      const spaceBelow = s.bottom - r.bottom
+      const spaceAbove = r.top - s.top
+      setDropUp(spaceBelow < 240 && spaceAbove > spaceBelow)
+    }
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    if (open) menuRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [open])
 
   const filtered = categories.filter(c => c.name.toLowerCase().includes(query.toLowerCase()))
   const selectedCategories = categories.filter(c => selectedCats.includes(c.id))
@@ -344,13 +397,16 @@ function CategoryMultiSelect({ categories, selectedCats, toggleCat }) {
         type="text"
         placeholder="Search categories..."
         value={query}
-        onFocus={() => setOpen(true)}
-        onChange={e => { setQuery(e.target.value); setOpen(true) }}
+        onFocus={openMenu}
+        onChange={e => { setQuery(e.target.value); if (!open) openMenu() }}
         className="w-full border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-300"
       />
 
       {open && (
-        <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-stone-200 rounded-xl shadow-lg">
+        <div
+          ref={menuRef}
+          className={`absolute z-10 w-full max-h-56 overflow-y-auto bg-white border border-stone-200 rounded-xl shadow-lg ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+        >
           {filtered.length === 0 ? (
             <div className="px-3.5 py-2.5 text-xs text-stone-400">No categories found</div>
           ) : (
@@ -376,36 +432,139 @@ function CategoryMultiSelect({ categories, selectedCats, toggleCat }) {
 }
 
 // ─── Sub-step: Create org form ─────────────────────────────────
-function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, selectedCats, toggleCat, ndaChecks, toggleNdaCheck, error, submitting, onSubmit, onBack }) {
+function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, categories, selectedCats, toggleCat, ndaChecks, toggleNdaCheck, error, submitting, onSubmit, onBack }) {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('personal')
+  const [kycOpen, setKycOpen] = useState(true)
   const isSupplier = role === 'supplier'
 
-  // Gate forward navigation between tabs on each tab's required fields —
-  // users can always step back, but can't jump ahead until the current
-  // tab is complete.
+  // Advisory format hints — shown under a field on blur, never block Next/Submit.
+  // Transient UI state: not part of `form`, not persisted in the draft.
+  const [fieldErrors, setFieldErrors] = useState({})
+  const validationCtx = { country: form.country }
+
+  function handleBlur(name, value) {
+    const msg = formatErrorFor(name, value, validationCtx)
+    setFieldErrors(prev => (prev[name] === msg ? prev : { ...prev, [name]: msg }))
+  }
+
+  // Value update + live-clear an existing error the moment it becomes valid.
+  // Never raises a new error mid-typing for a field that isn't already flagged.
+  function setFieldChecked(name, value) {
+    setField(name, value)
+    setFieldErrors(prev =>
+      prev[name] ? { ...prev, [name]: formatErrorFor(name, value, validationCtx) } : prev)
+  }
+
+  // Per-tab completeness — drives the green "completed" tab styling. Navigation
+  // is free (no hard stop); these are advisory only.
   const personalComplete = isVendorEntrance
-    ? !!(form.fullName.trim() && form.phone.trim() && form.country && form.titleRole.trim() && form.employees)
+    ? !!(form.fullName.trim() && form.phone.trim() && form.country && form.titleRole.trim() && form.employees && (!publicEntry || isValidEmail(form.orgEmail)))
     : !!(form.fullName.trim() && form.country && form.businessName.trim() && form.employees)
 
   const businessComplete = !!(
     form.registration.trim() && form.bankAccountNumber.trim() && form.bankIfsc.trim() &&
     form.pincode.trim() && form.address.trim() && form.ownerName.trim() && selectedCats.length > 0 &&
+    (!selectedCats.includes(OTHER_CAT_ID) || form.categoryOther.trim()) &&
     (isVendorEntrance ? (form.businessName.trim() && form.iec.trim()) : form.isi.trim())
   )
 
-  const tabUnlocked = { personal: true, business: personalComplete, agreement: personalComplete && businessComplete }
+  const agreementComplete = !!(
+    NDA_DECLARATIONS.every(d => ndaChecks[d.key]) &&
+    (form.signatureMode === 'type' ? form.ndaSignatureName.trim() : form.ndaSignatureImage)
+  )
+
+  const tabComplete = { personal: personalComplete, business: businessComplete, agreement: agreementComplete }
+
+  // Previous / Next just move between tabs — every tab is reachable directly too.
+  const tabKeys = SUPPLIER_TABS.map(t => t.key)
+  const tabIndex = tabKeys.indexOf(activeTab)
+  const isFirstTab = tabIndex === 0
+  const isLastTab = tabIndex === tabKeys.length - 1
+
+  function goPrev() {
+    if (isFirstTab) { if (onBack) onBack(); return }
+    setActiveTab(tabKeys[tabIndex - 1])
+  }
+  function goNext() {
+    if (!isLastTab) setActiveTab(tabKeys[tabIndex + 1])
+  }
+
+  // GSTIN → registered-business details.
+  // Full path: the backend's Appyflow lookup (Company Name, Address, Pincode…).
+  // Free fallback (no key / lookup down): derive Country + State from the GSTIN
+  // itself — the pincode field still fills the rest of the address.
+  const [gstLookup, setGstLookup] = useState('') // '' | 'loading' | 'ok' | 'partial'
+  const [gstFilled, setGstFilled] = useState([]) // labels of fields we prefilled
+  const [gstState, setGstState] = useState('')   // state derived from the code
+
+  // No-API fallback — everything derivable from the number alone.
+  function gstFreeFallback(gstin) {
+    setField('country', 'India')
+    setGstState(GST_STATE_CODES[gstin.slice(0, 2)] || '')
+    setGstFilled(['Country'])
+    setGstLookup('partial')
+  }
+
+  async function handleGstChange(value) {
+    const gstin = value.toUpperCase().replace(/\s/g, '').slice(0, 15)
+    setField('registration', gstin)
+    setFieldErrors(prev => (prev.registration
+      ? { ...prev, registration: GSTIN_RE.test(gstin) ? '' : prev.registration } : prev))
+
+    if (!GSTIN_RE.test(gstin)) {
+      setGstLookup('')
+      setGstFilled([])
+      setGstState('')
+      return
+    }
+
+    setGstLookup('loading')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_URL}/org-customers/gst-lookup?gstin=${gstin}`,
+        { headers: { Authorization: `Bearer ${session?.access_token}` } },
+      )
+      // 503 = full lookup not configured — fall back to number-only derivation.
+      if (res.status === 503) { gstFreeFallback(gstin); return }
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || 'Lookup failed')
+
+      const d = json.data
+      const filled = []
+      const companyName = d.tradeName || d.legalName
+      if (companyName) { setField('businessName', companyName); filled.push('Company Name') }
+      if (d.country) { setField('country', d.country); filled.push('Country') }
+      if (d.pincode) { setField('pincode', d.pincode); filled.push('Pincode') }
+      if (d.address) { setField('address', d.address); filled.push('Address') }
+      // For a proprietorship the GST legal name is the individual owner.
+      if (/propriet/i.test(d.constitution || '') && d.legalName) {
+        setField('ownerName', d.legalName); filled.push('Owner name')
+      }
+
+      setGstState(d.state || '')
+      setGstFilled(filled)
+      setGstLookup('ok')
+    } catch {
+      // Lookup unreachable — still give them the free derivation.
+      gstFreeFallback(gstin)
+    }
+  }
 
   // Pincode → address lookup via India Post's public PIN code API, so the
   // user gets a starting address they can still edit/extend with street detail.
   async function handlePincodeChange(value) {
     const digits = value.replace(/\D/g, '').slice(0, 6)
     setField('pincode', digits)
+    setFieldErrors(prev => (prev.pincode
+      ? { ...prev, pincode: INDIA_PIN_RE.test(digits) ? '' : prev.pincode } : prev))
     if (digits.length !== 6) return
     try {
       const res = await fetch(`https://api.postalpincode.in/pincode/${digits}`)
       const data = await res.json()
       const po = data?.[0]?.PostOffice?.[0]
-      if (po) setField('address', `${po.Name}, ${po.District}, ${po.State} - ${digits}`)
+      if (po) setField('address', `${po.District}, ${po.State}, ${po.Country || 'India'} - ${digits}`)
     } catch {
       // Lookup failed — user can still type the address manually.
     }
@@ -413,11 +572,23 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
 
   const personalFields = (
     <>
+      {publicEntry && (
+        <Input
+          label="Work email" required type="email" placeholder="you@company.com"
+          value={form.orgEmail} onChange={e => setField('orgEmail', e.target.value)}
+          hint="We'll verify this email when you submit the application."
+        />
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Input label="Full name" required type="text" placeholder="Your name"
           value={form.fullName} onChange={e => setField('fullName', e.target.value)} wrapperClassName="mb-0" />
-        <Input label="Phone" required={isVendorEntrance} type="tel" placeholder="+91 XXXXX XXXXX"
-          value={form.phone} onChange={e => setField('phone', e.target.value)} wrapperClassName="mb-0" />
+        <PhoneField label="Phone" required={isVendorEntrance}
+          value={form.phone}
+          country={form.country}
+          onChange={v => setFieldChecked('phone', v)}
+          onBlur={v => handleBlur('phone', v)}
+          error={fieldErrors.phone}
+          wrapperClassName="mb-0" />
       </div>
 
       <Select label="Country" required value={form.country} onChange={e => setField('country', e.target.value)}>
@@ -439,7 +610,11 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           />
         )}
         <Input label="Website" type="url" placeholder="https://..."
-          value={form.website} onChange={e => setField('website', e.target.value)} wrapperClassName="mb-0" />
+          value={form.website}
+          onChange={e => setFieldChecked('website', e.target.value)}
+          onBlur={e => handleBlur('website', e.target.value)}
+          error={fieldErrors.website}
+          wrapperClassName="mb-0" />
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-4">
@@ -481,72 +656,130 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         />
       )}
 
-      <div className={`grid grid-cols-2 gap-3 ${isVendorEntrance ? 'mt-4' : ''}`}>
-        <Input
-          label="GST No." required type="text"
-          placeholder="GST number"
-          value={form.registration} onChange={e => setField('registration', e.target.value)} wrapperClassName="mb-0"
-        />
-        <Input
-          label="CIN No." type="text"
-          placeholder="Corporate identification number"
-          value={form.cin} onChange={e => setField('cin', e.target.value)} wrapperClassName="mb-0"
-        />
-      </div>
+      <div className={`border border-stone-200 rounded-xl overflow-hidden ${isVendorEntrance ? 'mt-6' : ''}`}>
+        <button
+          type="button"
+          onClick={() => setKycOpen(o => !o)}
+          className="w-full flex items-center justify-between px-4 py-3 bg-stone-50 hover:bg-stone-100 transition-colors"
+          aria-expanded={kycOpen}
+        >
+          <span className="text-base font-semibold tracking-wide text-stone-700">KYC Docs</span>
+          <svg
+            width="16" height="16" viewBox="0 0 16 16" fill="none"
+            className={`text-stone-500 transition-transform duration-200 ${kycOpen ? 'rotate-180' : ''}`}
+          >
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
 
-      {isVendorEntrance ? (
-        <Input
-          label="Udyam No." type="text" className="mt-4"
-          placeholder="Udyam registration number"
-          value={form.udyam} onChange={e => setField('udyam', e.target.value)}
-        />
-      ) : (
-        <div className="grid grid-cols-2 gap-3 mt-4">
-          <Input
-            label="Udyam No." type="text"
-            placeholder="Udyam registration number"
-            value={form.udyam} onChange={e => setField('udyam', e.target.value)} wrapperClassName="mb-0"
-          />
-          <Input
-            label="MSME No." type="text"
-            placeholder="MSME registration number"
-            value={form.msme} onChange={e => setField('msme', e.target.value)} wrapperClassName="mb-0"
-          />
-        </div>
-      )}
+        {kycOpen && (
+          <div className="p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="GST / Tax No." required type="text"
+                placeholder="GST number"
+                value={form.registration}
+                onChange={e => handleGstChange(e.target.value)}
+                onBlur={e => handleBlur('registration', e.target.value)}
+                error={fieldErrors.registration}
+                wrapperClassName="mb-0"
+                maxLength={15}
+                hint={
+                  gstLookup === 'loading' ? 'Fetching details from GSTIN…'
+                    : gstLookup === 'ok'
+                      ? (gstFilled.length ? `Filled from GSTIN: ${gstFilled.join(', ')}` : 'GSTIN verified')
+                      : gstLookup === 'partial'
+                        ? `Set Country = India${gstState ? `, State = ${gstState}` : ''}. Add pincode to fill the address.`
+                        : undefined
+                }
+              />
+              <Input
+                label="Registration / CIN No." type="text"
+                placeholder="Corporate identification number"
+                value={form.cin}
+                onChange={e => setFieldChecked('cin', e.target.value)}
+                onBlur={e => handleBlur('cin', e.target.value)}
+                error={fieldErrors.cin}
+                wrapperClassName="mb-0"
+              />
+            </div>
 
-      <div className="grid grid-cols-2 gap-3 mt-4">
-        <Input
-          label={isVendorEntrance ? 'IEC No.' : 'ISI code'} required type="text"
-          placeholder={isVendorEntrance ? 'IEC No.' : 'ISI code'}
-          value={isVendorEntrance ? form.iec : form.isi}
-          onChange={e => setField(isVendorEntrance ? 'iec' : 'isi', e.target.value)}
-          wrapperClassName="mb-0"
-        />
-        <Input
-          label="Vendor logo" type="url"
-          placeholder="https://..."
-          value={form.logoUrl} onChange={e => setField('logoUrl', e.target.value)} wrapperClassName="mb-0"
-        />
-      </div>
+            {isVendorEntrance ? (
+              <Input
+                label="Udyam / MSME No." type="text" className="mt-4"
+                placeholder="Udyam registration number"
+                value={form.udyam}
+                onChange={e => setFieldChecked('udyam', e.target.value)}
+                onBlur={e => handleBlur('udyam', e.target.value)}
+                error={fieldErrors.udyam}
+              />
+            ) : (
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <Input
+                  label="Udyam No." type="text"
+                  placeholder="Udyam registration number"
+                  value={form.udyam}
+                  onChange={e => setFieldChecked('udyam', e.target.value)}
+                  onBlur={e => handleBlur('udyam', e.target.value)}
+                  error={fieldErrors.udyam}
+                  wrapperClassName="mb-0"
+                />
+                <Input
+                  label="MSME No." type="text"
+                  placeholder="MSME registration number"
+                  value={form.msme} onChange={e => setField('msme', e.target.value)} wrapperClassName="mb-0"
+                />
+              </div>
+            )}
 
-      <div className="grid grid-cols-2 gap-3 mt-4">
-        <Input
-          label="Bank account number" required type="text"
-          placeholder="Account number"
-          value={form.bankAccountNumber} onChange={e => setField('bankAccountNumber', e.target.value)} wrapperClassName="mb-0"
-        />
-        <Input
-          label="IFSC code" required type="text"
-          placeholder="IFSC code"
-          value={form.bankIfsc} onChange={e => setField('bankIfsc', e.target.value)} wrapperClassName="mb-0"
-        />
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <Input
+                label={isVendorEntrance ? 'IEC Code' : 'ISI code'} required type="text"
+                placeholder={isVendorEntrance ? 'IEC Code' : 'ISI code'}
+                value={isVendorEntrance ? form.iec : form.isi}
+                onChange={e => setFieldChecked(isVendorEntrance ? 'iec' : 'isi', e.target.value)}
+                onBlur={isVendorEntrance ? (e => handleBlur('iec', e.target.value)) : undefined}
+                error={isVendorEntrance ? fieldErrors.iec : undefined}
+                wrapperClassName="mb-0"
+              />
+              <Input
+                label="Vendor logo" type="url"
+                placeholder="https://..."
+                value={form.logoUrl} onChange={e => setField('logoUrl', e.target.value)} wrapperClassName="mb-0"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <Input
+                label="Swift/Bank account number" required type="text"
+                placeholder="Account number"
+                value={form.bankAccountNumber}
+                onChange={e => setFieldChecked('bankAccountNumber', e.target.value)}
+                onBlur={e => handleBlur('bankAccountNumber', e.target.value)}
+                error={fieldErrors.bankAccountNumber}
+                wrapperClassName="mb-0"
+              />
+              <Input
+                label="SWIFT/BIC/IFSC Code" required type="text"
+                placeholder="IFSC code"
+                value={form.bankIfsc}
+                onChange={e => setFieldChecked('bankIfsc', e.target.value)}
+                onBlur={e => handleBlur('bankIfsc', e.target.value)}
+                error={fieldErrors.bankIfsc}
+                wrapperClassName="mb-0"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <Input
         label="Pincode" required type="text" className="mt-4"
         placeholder="e.g. 122001" inputMode="numeric" maxLength={6}
-        value={form.pincode} onChange={e => handlePincodeChange(e.target.value)}
+        value={form.pincode}
+        onChange={e => handlePincodeChange(e.target.value)}
+        onBlur={e => handleBlur('pincode', e.target.value)}
+        error={fieldErrors.pincode}
       />
 
       <Input
@@ -561,23 +794,24 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
           placeholder="Full name"
           value={form.ownerName} onChange={e => setField('ownerName', e.target.value)} wrapperClassName="mb-0"
         />
-        <Input
-          label="Owner / Director phone" type="tel"
-          placeholder="+91 XXXXX XXXXX"
-          value={form.ownerPhone} onChange={e => setField('ownerPhone', e.target.value)} wrapperClassName="mb-0"
+        <PhoneField
+          label="Owner / Director phone"
+          value={form.ownerPhone}
+          country={form.country}
+          onChange={v => setFieldChecked('ownerPhone', v)}
+          onBlur={v => handleBlur('ownerPhone', v)}
+          error={fieldErrors.ownerPhone}
+          wrapperClassName="mb-0"
         />
       </div>
 
       <Input
         label="Owner / Director email" type="email" className="mt-4"
         placeholder="owner@company.com"
-        value={form.ownerEmail} onChange={e => setField('ownerEmail', e.target.value)}
-      />
-
-      <Input
-        label="Reason for contact" type="text" className="mt-4"
-        placeholder="Why are you reaching out to us?"
-        value={form.reasonForContact} onChange={e => setField('reasonForContact', e.target.value)}
+        value={form.ownerEmail}
+        onChange={e => setFieldChecked('ownerEmail', e.target.value)}
+        onBlur={e => handleBlur('ownerEmail', e.target.value)}
+        error={fieldErrors.ownerEmail}
       />
 
       <div className="mb-4 mt-4">
@@ -587,7 +821,20 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         <p className="text-xs text-stone-400 mb-2.5">
           Select all categories your business supplies
         </p>
-        <CategoryMultiSelect categories={categories} selectedCats={selectedCats} toggleCat={toggleCat} />
+        <CategoryMultiSelect
+          categories={[...categories, { id: OTHER_CAT_ID, name: 'Others' }]}
+          selectedCats={selectedCats}
+          toggleCat={toggleCat}
+        />
+
+        {selectedCats.includes(OTHER_CAT_ID) && (
+          <Input
+            label="Please specify other category" required type="text" className="mt-3"
+            placeholder="e.g. Pet Supplies, Stationery"
+            value={form.categoryOther}
+            onChange={e => setField('categoryOther', e.target.value)}
+          />
+        )}
       </div>
     </>
   )
@@ -600,398 +847,11 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
       <p className="text-xs text-stone-400 mb-2.5">
         Please review and accept our Non-Disclosure, Non-Circumvention &amp; Non-Solicitation Agreement.
       </p>
-      <div className="max-h-64 overflow-y-auto text-xs text-stone-600 leading-relaxed border border-stone-200 rounded-xl p-4 mb-3 bg-stone-50">
-        <p className="text-sm font-bold text-stone-900 mb-1">
-          MASTER NON-DISCLOSURE, NON-CIRCUMVENTION &amp; NON-SOLICITATION AGREEMENT
-        </p>
-        <p className="font-semibold text-stone-700 mb-3">(Vendor Confidentiality &amp; Business Protection Agreement)</p>
-
-        <p className="mb-3">
-          <strong>This Agreement</strong> is entered into on{' '}
-          <strong>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>{' '}
-          ("Effective Date")
-        </p>
-
-        <p className="font-bold text-stone-900 mb-1">BETWEEN</p>
-        <p className="mb-3">
-          <strong>Twif Technologies Private Limited</strong>, having its offices in Bangalore, India,
-          with global headquarters in Singapore (hereinafter referred to as <strong>"Twif"</strong>, which
-          expression shall include its successors, affiliates and permitted assigns);
-        </p>
-
-        <p className="mb-1">AND</p>
-        <p className="mb-1">
-          <strong>Vendor Name:</strong> {form.businessName || '____________________'}
-        </p>
-        <p className="mb-3">
-          <strong>Address:</strong> {form.address || '____________________'}
-        </p>
-        <p className="mb-3">
-          (hereinafter referred to as the <strong>"Vendor"</strong>).
-          Twif and the Vendor shall collectively be referred to as the <strong>"Parties"</strong>.
-        </p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">1. PURPOSE</p>
-        <p className="mb-3">
-          The Vendor shall manufacture, develop, source, sample, inspect, package, or otherwise
-          provide products and services for buyers introduced by Twif. During this relationship, the
-          Vendor will have access to confidential commercial, technical and proprietary information
-          belonging to Twif and/or its customers. The purpose of this Agreement is to protect Twif's
-          intellectual property, trade secrets, customer relationships and proprietary business
-          information.
-        </p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">2. CONFIDENTIAL INFORMATION</p>
-        <p className="mb-1">Confidential Information shall include but not be limited to:</p>
-        <ul className="list-disc pl-5 mb-3 space-y-0.5">
-          <li>Buyer names and identities</li>
-          <li>Buyer contacts</li>
-          <li>Product developments</li>
-          <li>Designs</li>
-          <li>CAD drawings</li>
-          <li>Sketches</li>
-          <li>Technical drawings</li>
-          <li>Samples</li>
-          <li>Tooling</li>
-          <li>Moulds</li>
-          <li>Artwork</li>
-          <li>Packaging</li>
-          <li>Product specifications</li>
-          <li>Bill of Materials (BOM)</li>
-          <li>Cost sheets</li>
-          <li>Quotations</li>
-          <li>Purchase Orders</li>
-          <li>Vendor Scorecards</li>
-          <li>Quality reports</li>
-          <li>Test reports</li>
-          <li>Compliance documents</li>
-          <li>Product photographs</li>
-          <li>Merchandising documents</li>
-          <li>PLM Data</li>
-          <li>PCT Data</li>
-          <li>ERP Data</li>
-          <li>Buyer Portal information</li>
-          <li>Vendor Portal information</li>
-          <li>AI-generated outputs</li>
-          <li>Trade intelligence</li>
-          <li>Market research</li>
-          <li>Dashboards</li>
-          <li>Pricing models</li>
-          <li>Business methodologies</li>
-          <li>Customer strategies</li>
-          <li>Forecasts</li>
-          <li>Financial information</li>
-        </ul>
-        <p className="mb-3">Whether oral, written, electronic or visual.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">3. CONFIDENTIALITY OBLIGATIONS</p>
-        <p className="mb-1">The Vendor agrees that it shall:</p>
-        <ul className="list-disc pl-5 mb-3 space-y-0.5">
-          <li>Keep all information strictly confidential.</li>
-          <li>Use information solely for executing Twif business.</li>
-          <li>Not disclose information to any third party.</li>
-          <li>Restrict access only to authorized personnel.</li>
-          <li>Ensure employees are equally bound by confidentiality obligations.</li>
-        </ul>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">4. NON-CIRCUMVENTION</p>
-        <p className="mb-1">
-          The Vendor expressly agrees that during the business relationship and for five (5) years
-          thereafter, it shall not directly or indirectly:
-        </p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Contact any buyer introduced by Twif.</li>
-          <li>Solicit direct business from any Twif buyer.</li>
-          <li>Quote directly.</li>
-          <li>Supply directly.</li>
-          <li>Negotiate directly.</li>
-          <li>Accept RFQs.</li>
-          <li>Participate in tenders.</li>
-          <li>Create commercial relationships.</li>
-          <li>Divert business away from Twif introduced clients.</li>
-        </ul>
-        <p className="mb-1">This restriction applies irrespective of whether:</p>
-        <ul className="list-disc pl-5 mb-3 space-y-0.5">
-          <li>orders are currently active;</li>
-          <li>sampling has commenced; or</li>
-          <li>discussions are ongoing.</li>
-        </ul>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">5. BUYER EXCLUSIVE DESIGNS</p>
-        <p className="mb-1">The Vendor agrees that all buyer developments remain confidential. Accordingly, the Vendor shall not:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Show buyer developments to any other customer.</li>
-          <li>Sell similar products to competitors.</li>
-          <li>Use photographs for marketing.</li>
-          <li>Display products in showrooms.</li>
-          <li>Display products at exhibitions.</li>
-          <li>Upload products on websites.</li>
-          <li>Upload products on social media.</li>
-          <li>Include products in catalogues.</li>
-          <li>Manufacture exclusive developments without written approval.</li>
-        </ul>
-        <p className="mb-1">This includes:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Designs</li>
-          <li>Samples</li>
-          <li>Packaging</li>
-          <li>Graphics</li>
-          <li>Artwork</li>
-          <li>Colours</li>
-          <li>Finishes</li>
-          <li>Product concepts</li>
-        </ul>
-        <p className="mb-3">Whether production has commenced or not.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">6. INTELLECTUAL PROPERTY</p>
-        <p className="mb-1">All Intellectual Property developed through Twif shall remain the exclusive property of:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>the Buyer; or</li>
-          <li>Twif,</li>
-        </ul>
-        <p className="mb-1">including:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Designs</li>
-          <li>Technical Drawings</li>
-          <li>CAD Files</li>
-          <li>Tooling</li>
-          <li>Moulds</li>
-          <li>Packaging</li>
-          <li>Product Concepts</li>
-          <li>Product Photography</li>
-          <li>AI Models</li>
-          <li>Software</li>
-          <li>Workflows</li>
-          <li>Documentation</li>
-        </ul>
-        <p className="mb-3">The Vendor shall acquire no ownership rights whatsoever.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">7. SOFTWARE &amp; DIGITAL ASSET PROTECTION</p>
-        <p className="mb-1">The Vendor acknowledges that Twif owns proprietary technology platforms including but not limited to:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Vendor Portal</li>
-          <li>AI Dashboards</li>
-          <li>Trade Intelligence Modules</li>
-          <li>Workflow Engines</li>
-        </ul>
-        <p className="mb-1">The Vendor shall not:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Copy</li>
-          <li>Reverse engineer</li>
-          <li>Replicate</li>
-          <li>Modify</li>
-          <li>Decompile</li>
-          <li>Reproduce</li>
-          <li>Commercially exploit</li>
-        </ul>
-        <p className="mb-3">any software, workflow, interface, database structure or technology belonging to Twif.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">8. TRADE SECRET PROTECTION</p>
-        <p className="mb-1">The Vendor acknowledges that Twif possesses valuable trade secrets including:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Supply chain methodologies</li>
-          <li>Costing models</li>
-          <li>Vendor intelligence</li>
-          <li>Buyer intelligence</li>
-          <li>Pricing logic</li>
-          <li>Procurement models</li>
-          <li>Business processes</li>
-          <li>Analytics</li>
-        </ul>
-        <p className="mb-3">Such information shall remain confidential indefinitely unless publicly available through lawful means.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">9. NON-SOLICITATION OF BUYER/CLIENTS</p>
-        <p className="mb-3">
-          The Vendor shall not directly or indirectly recruit, solicit, induce, employ or engage, consultant
-          or appoint a representative/agents to approach Twif clients during the business relationship and
-          for without Twif's prior written consent.
-        </p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">10. DATA SECURITY</p>
-        <p className="mb-1">The Vendor shall implement appropriate physical, technical and organisational safeguards to prevent:</p>
-        <ul className="list-disc pl-5 mb-3 space-y-0.5">
-          <li>Data theft</li>
-          <li>Unauthorized access</li>
-          <li>Data leakage</li>
-          <li>Cyber breaches</li>
-          <li>Loss of confidential information</li>
-        </ul>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">11. RETURN OF MATERIALS</p>
-        <p className="mb-1">Upon request or termination:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>all documents;</li>
-          <li>drawings;</li>
-          <li>samples;</li>
-          <li>prototypes;</li>
-          <li>electronic files;</li>
-          <li>digital records;</li>
-          <li>confidential materials;</li>
-        </ul>
-        <p className="mb-3">shall immediately be returned or permanently destroyed.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">12. BREACH</p>
-        <p className="mb-1">Any breach shall entitle Twif to:</p>
-        <ul className="list-disc pl-5 mb-3 space-y-0.5">
-          <li>Immediate termination.</li>
-          <li>Suspension of all orders.</li>
-          <li>Cancellation of outstanding business.</li>
-          <li>Recovery of direct losses and damages as permitted by law.</li>
-          <li>Injunctive relief.</li>
-          <li>Specific performance.</li>
-          <li>Recovery of legal expenses.</li>
-        </ul>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">13. DISPUTE RESOLUTION</p>
-        <p className="mb-3">
-          The Parties shall first attempt to resolve disputes amicably. Failing resolution within
-          thirty (30) days, disputes shall be referred to arbitration under the Arbitration and
-          Conciliation Act, 1996. Seat of arbitration: Bangalore, India. Language: English. The
-          arbitration award shall be final and binding.
-        </p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">14. GOVERNING LAW</p>
-        <p className="mb-3">
-          This Agreement shall be governed by the laws of India. Courts at Bangalore, India shall
-          have exclusive jurisdiction for interim and enforcement proceedings.
-        </p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">15. TERM</p>
-        <p className="mb-1">This Agreement shall remain effective during the business relationship.</p>
-        <p className="mb-1">The obligations relating to:</p>
-        <ul className="list-disc pl-5 mb-1 space-y-0.5">
-          <li>Confidentiality</li>
-          <li>Intellectual Property</li>
-          <li>Trade Secrets</li>
-          <li>Buyer Protection</li>
-          <li>Non-Circumvention</li>
-        </ul>
-        <p className="mb-3">shall survive for five (5) years following termination, or longer where required by law or contract.</p>
-
-        <p className="text-sm font-bold text-stone-900 mt-3 mb-1">16. ENTIRE AGREEMENT</p>
-        <p>
-          This Agreement constitutes the complete understanding between the Parties and supersedes all
-          prior oral or written communications relating to its subject matter. Any amendment shall
-          only be valid if made in writing and signed by both Parties.
-        </p>
-
-        <div className="text-[10px] text-stone-500 leading-normal border-t border-stone-200 mt-4 pt-3">
-          <p className="text-xs font-bold text-stone-800 mb-0.5">SCHEDULE A</p>
-          <p className="font-semibold text-stone-700 mb-2">Buyer Exclusivity &amp; Product Development Protocol</p>
-          <p className="mb-2">
-            This Schedule forms an integral part of the Master Non-Disclosure, Non-Circumvention &amp;
-            Non-Solicitation Agreement entered into between Twif Technologies Private Limited ("Twif") and the Vendor.
-          </p>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">1. Buyer Exclusivity</p>
-          <p className="mb-0.5">
-            The Vendor acknowledges that all buyers introduced by Twif are proprietary business
-            relationships of Twif. Accordingly, the Vendor shall not, directly or indirectly:
-          </p>
-          <ul className="list-disc pl-4 mb-1 space-y-0.5">
-            <li>Contact, solicit, negotiate, quote, invoice, supply, or conduct business with any buyer introduced by Twif without Twif's prior written approval.</li>
-            <li>Accept enquiries, RFQs, or purchase orders directly from such buyers.</li>
-            <li>Share buyer contact details with any third party.</li>
-            <li>Encourage buyers to bypass Twif for any commercial transaction.</li>
-          </ul>
-          <p className="mb-2">This restriction shall remain valid during the business relationship and for five (5) years following its termination.</p>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">2. Product Development Confidentiality</p>
-          <p className="mb-0.5">All product developments undertaken through Twif shall remain strictly confidential. This includes, but is not limited to:</p>
-          <ul className="list-disc pl-4 mb-1 space-y-0.5">
-            <li>New product concepts</li>
-            <li>Sketches and mood boards</li>
-            <li>CAD drawings</li>
-            <li>Technical drawings</li>
-            <li>Product specifications</li>
-            <li>Bill of Materials (BOM)</li>
-            <li>Artwork and graphics</li>
-            <li>Packaging designs</li>
-            <li>Samples and prototypes</li>
-            <li>Costing information</li>
-            <li>Product photography</li>
-            <li>AI-generated concepts</li>
-            <li>Buyer comments and revisions</li>
-          </ul>
-          <p className="mb-2">The Vendor shall use such information solely for executing Twif-approved work.</p>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">3. Communication Protocol</p>
-          <p className="mb-0.5">
-            The Vendor shall communicate only through the designated Twif representative unless expressly
-            authorized otherwise in writing. No discussions relating to:
-          </p>
-          <ul className="list-disc pl-4 mb-1 space-y-0.5">
-            <li>New developments</li>
-            <li>Pricing</li>
-            <li>Product specifications</li>
-            <li>Design changes</li>
-            <li>Technical comments</li>
-            <li>Sampling status</li>
-            <li>Commercial negotiations</li>
-          </ul>
-          <p className="mb-2">shall be conducted directly with the buyer without prior written approval from Twif.</p>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">4. Approval Process</p>
-          <p className="mb-0.5">No product shall be treated as approved until Twif communicates written confirmation. The Vendor shall not:</p>
-          <ul className="list-disc pl-4 mb-1 space-y-0.5">
-            <li>Commence production.</li>
-            <li>Order raw materials.</li>
-            <li>Order packaging materials.</li>
-            <li>Create tooling or moulds.</li>
-            <li>Book production capacity.</li>
-            <li>Display or publicize products.</li>
-          </ul>
-          <p className="mb-2">until final approval has been received through Twif.</p>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">5. Product Display Restrictions</p>
-          <p className="mb-0.5">Without prior written approval from Twif, the Vendor shall not:</p>
-          <ul className="list-disc pl-4 mb-2 space-y-0.5">
-            <li>Display buyer-exclusive products in factories or showrooms.</li>
-            <li>Exhibit products at fairs or exhibitions.</li>
-            <li>Publish photographs in catalogues, brochures, websites, or social media.</li>
-            <li>Circulate product images through WhatsApp, email, or other marketing channels.</li>
-            <li>Use buyer developments for marketing or promotional purposes.</li>
-          </ul>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">6. Reproduction Restrictions</p>
-          <p className="mb-0.5">
-            The Vendor shall not manufacture, reproduce, modify, or offer substantially similar products
-            for any third party where the product has been developed exclusively for a Twif buyer. This
-            restriction applies irrespective of whether:
-          </p>
-          <ul className="list-disc pl-4 mb-2 space-y-0.5">
-            <li>the order is placed,</li>
-            <li>sampling is completed,</li>
-            <li>or production has commenced.</li>
-          </ul>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">7. Tooling, Moulds &amp; Development Assets</p>
-          <p className="mb-2">
-            Unless otherwise agreed in writing, all tooling, moulds, jigs, fixtures, artwork, CAD files,
-            technical documents, samples, and development assets created specifically for Twif buyers
-            shall remain the exclusive property of the respective buyer and/or Twif. Such assets shall
-            not be reused for any other customer without prior written consent.
-          </p>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">8. Breach</p>
-          <p className="mb-0.5">Any breach of this Schedule shall constitute a material breach of the Agreement and may result in:</p>
-          <ul className="list-disc pl-4 mb-2 space-y-0.5">
-            <li>Immediate termination of business.</li>
-            <li>Cancellation of current and future orders.</li>
-            <li>Removal of the Vendor from Twif's approved vendor panel.</li>
-            <li>Recovery of damages and legal costs as permitted by applicable law.</li>
-            <li>Injunctive relief or other legal remedies available under law.</li>
-          </ul>
-
-          <p className="font-bold text-stone-800 mt-2 mb-0.5">Vendor Acknowledgement</p>
-          <p>
-            The Vendor acknowledges that compliance with this Schedule is fundamental to protecting
-            Twif's buyer relationships, intellectual property, product developments, and commercial
-            interests. The Vendor agrees to adhere strictly to these obligations throughout the
-            business relationship.
-          </p>
-        </div>
-      </div>
+      <NdaAgreementText
+        businessName={form.businessName}
+        address={form.address}
+        className="max-h-64 overflow-y-auto text-xs text-stone-600 leading-relaxed border border-stone-200 rounded-xl p-4 mb-3 bg-stone-50"
+      />
 
       <div className="flex flex-col gap-2 mb-3">
         {NDA_DECLARATIONS.map(d => (
@@ -1060,40 +920,49 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         >
           {isVendorEntrance ? "Vendor's Organisation details" : 'Organisation details'}
         </h1>
-        <button type="button" onClick={onBack} className="text-sm text-stone-400 hover:text-stone-700 transition-colors flex-shrink-0 mt-1">
-          ← Back
-        </button>
+        {!publicEntry && (
+          <button type="button" onClick={onBack} className="text-sm text-stone-400 hover:text-stone-700 transition-colors flex-shrink-0 mt-1">
+            ← Back
+          </button>
+        )}
       </div>
       <p className="text-sm text-stone-500 leading-relaxed mb-6">
         Tell us about yourself and your company.
       </p>
 
       <div className="flex gap-1 mb-6">
-        {SUPPLIER_TABS.map(t => (
-          <button
-            key={t.key}
-            type="button"
-            disabled={!tabUnlocked[t.key]}
-            onClick={() => tabUnlocked[t.key] && setActiveTab(t.key)}
-            className={`
-              flex-1 py-2 text-xs font-medium rounded-lg transition-all duration-150 whitespace-nowrap
-              flex items-center justify-center gap-1.5
-              ${activeTab === t.key
-                ? 'bg-white text-stone-900 shadow-sm border border-stone-200'
-                : tabUnlocked[t.key]
-                  ? 'text-stone-500 hover:text-stone-700 border border-transparent cursor-pointer'
-                  : 'text-stone-300 border border-transparent cursor-not-allowed'}
-            `}
-          >
-            <span className={`
-              flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold flex-shrink-0
-              ${activeTab === t.key ? 'bg-stone-900 text-white' : tabUnlocked[t.key] ? 'bg-stone-200 text-stone-600' : 'bg-stone-100 text-stone-300'}
-            `}>
-              {t.step}
-            </span>
-            {t.label}
-          </button>
-        ))}
+        {SUPPLIER_TABS.map(t => {
+          const isActive = activeTab === t.key
+          const done = tabComplete[t.key]
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActiveTab(t.key)}
+              className={`
+                flex-1 py-2 text-xs font-medium rounded-lg transition-all duration-150 whitespace-nowrap
+                flex items-center justify-center gap-1.5 cursor-pointer border
+                ${isActive
+                  ? 'bg-white text-stone-900 shadow-sm border-stone-200'
+                  : done
+                    ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                    : 'text-stone-500 hover:text-stone-700 border-transparent'}
+              `}
+            >
+              <span className={`
+                flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold flex-shrink-0
+                ${isActive ? 'bg-stone-900 text-white' : done ? 'bg-green-600 text-white' : 'bg-stone-200 text-stone-600'}
+              `}>
+                {done ? (
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6.5 4.5 9 10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : t.step}
+              </span>
+              {t.label}
+            </button>
+          )
+        })}
       </div>
 
       {error && <Alert type="error">{error}</Alert>}
@@ -1104,10 +973,28 @@ function CreateOrgStep({ role, isVendorEntrance, form, setField, categories, sel
         {activeTab === 'agreement' && agreementFields}
       </div>
 
-      {activeTab === 'agreement' && (
-        <Button variant="primary" fullWidth loading={submitting} className="mt-2 py-3" onClick={onSubmit}>
-          Submit for review
+      <div className="flex items-center justify-between gap-3 mt-4">
+        <Button type="button" variant="secondary" className="py-3" disabled={isFirstTab} onClick={goPrev}>
+          ← Previous
         </Button>
+
+        {isLastTab ? (
+          <Button type="button" variant="primary" loading={submitting} className="py-3" onClick={onSubmit}>
+            Submit for review
+          </Button>
+        ) : (
+          <Button type="button" variant="primary" className="py-3" onClick={goNext}>
+            Next →
+          </Button>
+        )}
+      </div>
+      {publicEntry && (
+        <p className="text-center text-sm text-stone-500 mt-5">
+          Already have an account?{' '}
+          <button type="button" onClick={() => navigate('/auth')} className="text-[#4d68f0] font-medium hover:underline">
+            Sign in
+          </button>
+        </p>
       )}
     </>
   )
@@ -1165,8 +1052,93 @@ function PendingStep({ email, pendingType }) {
   )
 }
 
+// Draft is kept in sessionStorage so a page refresh mid-form doesn't drop the
+// user back to step 1 with an empty form.
+const DRAFT_KEY = 'twif-vendor-onboarding-draft'
+
+function emptyForm(email) {
+  return {
+    orgEmail: email || '',
+    fullName: '', phone: '', country: '', businessName: '', titleRole: '',
+    website: '', employees: '', retailerType: '', supplierType: '', supplierTypeOther: '', registration: '',
+    cin: '', udyam: '', msme: '', isi: '', iec: '', bankAccountNumber: '', bankIfsc: '',
+    pincode: '', address: '', ownerName: '', ownerEmail: '', ownerPhone: '',
+    logoUrl: '', categoryOther: '', ndaSignatureName: '', signatureMode: 'type', ndaSignatureImage: '',
+  }
+}
+
+function loadDraft(email, publicEntry) {
+  try {
+    const snap = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null')
+    if (!snap || ![1, 2].includes(snap.step)) return null
+    if (publicEntry && snap.publicEntry) return snap
+    if (!email || snap.email !== email) return null
+    return snap
+  } catch {
+    return null
+  }
+}
+
+function clearDraft() {
+  try { sessionStorage.removeItem(DRAFT_KEY) } catch { /* ignore */ }
+}
+
 // ─── Main OnboardingPage ───────────────────────────────────────
-export default function OnboardingPage({ forcedRole: routeForcedRole }) {
+const OTP_LENGTH = 8
+
+function PublicOtpGate({ email, onVerified, onCancel, verifying, error }) {
+  const { secondsLeft, canResend, resending, resendError, resend } = useOTPTimer(email, 'signup')
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <h2 className="text-center text-sm font-bold tracking-[0.18em] text-[#4d68f0] uppercase mb-3">
+          Verify email
+        </h2>
+        <p className="text-center text-sm text-stone-500 leading-relaxed mb-4">
+          We sent an {OTP_LENGTH}-digit code to{' '}
+          <strong className="text-stone-900 font-medium">{email}</strong>
+        </p>
+        {(error || resendError) && <Alert type="error">{error || resendError}</Alert>}
+        <OTPInput length={OTP_LENGTH} onComplete={onVerified} hasError={!!error} disabled={verifying} />
+        {verifying && (
+          <div className="flex justify-center mb-3">
+            <Spinner light={false} size="w-5 h-5" />
+          </div>
+        )}
+        <div className="text-center text-sm text-stone-500 mt-2">
+          {canResend ? (
+            <span>
+              Didn't receive it?{' '}
+              <button
+                type="button"
+                onClick={resend}
+                disabled={resending || verifying}
+                className="text-[#4d68f0] font-medium hover:underline disabled:opacity-50"
+              >
+                {resending ? 'Sending…' : 'Resend code'}
+              </button>
+            </span>
+          ) : (
+            <span>
+              Resend code in <strong className="text-stone-900">{secondsLeft}s</strong>
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="mt-5 w-full text-sm text-stone-400 hover:text-stone-700"
+        >
+          ← Back to form
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main OnboardingPage ───────────────────────────────────────
+export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntry = false }) {
   const navigate = useNavigate()
   const { state } = useLocation()
   const { email, pendingReview, forcedRole: stateForcedRole } = state || {}
@@ -1174,31 +1146,52 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
   // regardless of whether history state carried it through correctly.
   const forcedRole = routeForcedRole || stateForcedRole
 
+  // A saved draft (from a refresh) wins over the default entry step — but never
+  // in pendingReview mode, which is a deliberate deep-link to the status screen.
+  const [draft] = useState(() => (pendingReview ? null : loadDraft(email, publicEntry)))
+
+  // Public website link opens the vendor form immediately (step 2).
   // forcedRole (from /auth/buyer or /auth/vendor) skips the role picker —
   // land straight on the org-lookup step with the role already decided.
-  const [step, setStep] = useState(pendingReview ? 3 : (forcedRole ? 1 : 0))
-  const [role, setRole] = useState(forcedRole || 'buyer')
+  const [step, setStep] = useState(
+    draft?.step ?? (pendingReview ? 3 : publicEntry ? 2 : (forcedRole ? 1 : 0))
+  )
+  const [role, setRole] = useState(forcedRole || draft?.role || 'buyer')
   // The /auth/vendor entrance has its own field set (Title/Role, IEC code,
   // required Phone, Company Name moved to Business Info, no MSME No.)
   const isVendorEntrance = forcedRole === 'supplier'
   const [categories, setCategories] = useState(FALLBACK_CATEGORIES)
-  const [selectedCats, setSelectedCats] = useState([])
+  const [selectedCats, setSelectedCats] = useState(draft?.selectedCats ?? [])
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [pendingType, setPendingType] = useState('new') // 'join' | 'claim' | 'new'
+  const [showPreview, setShowPreview] = useState(false)
+  const [showOtpGate, setShowOtpGate] = useState(false)
+  const [otpEmail, setOtpEmail] = useState('')
+  const [otpVerifying, setOtpVerifying] = useState(false)
+  const [otpError, setOtpError] = useState('')
 
-  const [form, setFormState] = useState({
-    orgEmail: email || '',
-    fullName: '', phone: '', country: '', businessName: '', titleRole: '',
-    website: '', employees: '', retailerType: '', supplierType: '', supplierTypeOther: '', registration: '',
-    cin: '', udyam: '', msme: '', isi: '', iec: '', bankAccountNumber: '', bankIfsc: '',
-    pincode: '', address: '', ownerName: '', ownerEmail: '', ownerPhone: '', reasonForContact: '',
-    logoUrl: '', ndaSignatureName: '', signatureMode: 'type', ndaSignatureImage: '',
-  })
+  const [form, setFormState] = useState(
+    draft?.form ? { ...emptyForm(email), ...draft.form } : emptyForm(email)
+  )
 
-  const [ndaChecks, setNdaChecks] = useState({
-    read: false, authorized: false,
-  })
+  const [ndaChecks, setNdaChecks] = useState(
+    draft?.ndaChecks ?? { read: false, authorized: false }
+  )
+
+  // Persist the in-progress draft on every change; drop it once the flow leaves
+  // the form (submitted → step 3, or handled elsewhere).
+  useEffect(() => {
+    if (pendingReview) return
+    const keyEmail = email || (publicEntry ? (form.orgEmail || 'public') : '')
+    if (!keyEmail) return
+    if (![1, 2].includes(step)) { clearDraft(); return }
+    try {
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+        email: keyEmail, publicEntry: !!publicEntry, step, role, form, selectedCats, ndaChecks,
+      }))
+    } catch { /* quota / disabled storage — draft just won't persist */ }
+  }, [email, step, role, form, selectedCats, ndaChecks, pendingReview, publicEntry])
 
   const [suggestedOrg, setSuggestedOrg] = useState(null) // user picked from name suggestions
 
@@ -1207,9 +1200,10 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
   // forcedRole entrances skip RoleStep — trigger the domain lookup ourselves
   // on mount instead of it happening via the (skipped) "Continue" click.
   useEffect(() => {
+    if (publicEntry) return
     if (forcedRole && email) lookup(email, forcedRole, '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forcedRole, email])
+  }, [forcedRole, email, publicEntry])
 
   // The effective result — either from domain lookup or user-selected name suggestion
   const effectiveResult = suggestedOrg
@@ -1231,19 +1225,20 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
   const { session, loading: authLoading } = useAuth()
 
   // Guard: no email in router state → redirect to /auth only if genuinely unauthenticated.
-  // Authenticated users without router state are handled by the profile guards below.
+  // Public vendor link skips this — visitors land on the form without OTP first.
   useEffect(() => {
-    if (authLoading) return
+    if (publicEntry || authLoading) return
     if (!email && !session) navigate('/auth', { replace: true })
-  }, [email, session, authLoading, navigate])
+  }, [email, session, authLoading, navigate, publicEntry])
 
   // Guard: already onboarded AND approved → send to dashboard
-  // Skip this guard in pendingReview mode — user is here intentionally to see the pending screen
+  // Skip for public vendor registration (website button) and pendingReview.
   useEffect(() => {
+    if (publicEntry) return
     if (!pendingReview && profileFetched && portalUser?.onboarding_completed) {
       navigate('/dashboard', { replace: true })
     }
-  }, [pendingReview, profileFetched, portalUser, navigate])
+  }, [pendingReview, profileFetched, portalUser, navigate, publicEntry])
 
   // Poll for approval when on the pending review screen.
   // Refreshes the profile every 10s — redirects to dashboard as soon as org membership appears.
@@ -1377,41 +1372,77 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
     }
   }
 
-  async function handleCreateOrg() {
-    if (!form.fullName.trim()) return setSubmitError('Full name is required')
-    if (!form.country) return setSubmitError('Country is required')
-    if (!form.businessName.trim()) return setSubmitError('Company name is required')
-    if (!form.employees) return setSubmitError('Number of employees is required')
-    if (role === 'supplier' && selectedCats.length === 0) return setSubmitError('Please select at least one product category')
-    if (form.website && !isValidUrl(form.website)) return setSubmitError('Website must start with https://')
+  // Returns an error message, or '' when the form is ready to submit.
+  function validateOrg() {
+    if (publicEntry && !isValidEmail(form.orgEmail)) return 'Work email is required'
+    if (!form.fullName.trim()) return 'Full name is required'
+    if (!form.country) return 'Country is required'
+    if (!form.businessName.trim()) return 'Company name is required'
+    if (!form.employees) return 'Number of employees is required'
+    if (role === 'supplier' && selectedCats.length === 0) return 'Please select at least one product category'
+    if (selectedCats.includes(OTHER_CAT_ID) && !form.categoryOther.trim()) return 'Please specify your other product category'
+    if (form.website && !isValidUrl(form.website)) return 'Website must start with https://'
     if (role === 'supplier') {
-      if (!form.registration.trim()) return setSubmitError('GST No. is required')
+      if (!form.registration.trim()) return 'GST No. is required'
       if (isVendorEntrance) {
-        if (!form.phone.trim()) return setSubmitError('Phone is required')
-        if (!form.titleRole.trim()) return setSubmitError('Title / Role is required')
-        if (!form.iec.trim()) return setSubmitError('IEC No. is required')
+        if (!form.phone.trim()) return 'Phone is required'
+        if (!form.titleRole.trim()) return 'Title / Role is required'
+        if (!form.iec.trim()) return 'IEC No. is required'
       } else if (!form.isi.trim()) {
-        return setSubmitError('ISI code is required')
+        return 'ISI code is required'
       }
-      if (!form.bankAccountNumber.trim()) return setSubmitError('Bank account number is required')
-      if (!form.bankIfsc.trim()) return setSubmitError('IFSC code is required')
-      if (form.pincode.trim().length !== 6) return setSubmitError('A valid 6-digit pincode is required')
-      if (!form.address.trim()) return setSubmitError('Address is required')
-      if (!form.ownerName.trim()) return setSubmitError('Owner / Director name is required')
-      if (!NDA_DECLARATIONS.every(d => ndaChecks[d.key])) return setSubmitError('Please accept all NDA declarations to continue')
+      if (!form.bankAccountNumber.trim()) return 'Bank account number is required'
+      if (!form.bankIfsc.trim()) return 'IFSC code is required'
+      if (form.pincode.trim().length !== 6) return 'A valid 6-digit pincode is required'
+      if (!form.address.trim()) return 'Address is required'
+      if (!form.ownerName.trim()) return 'Owner / Director name is required'
+      if (!NDA_DECLARATIONS.every(d => ndaChecks[d.key])) return 'Please accept all NDA declarations to continue'
       if (form.signatureMode === 'type' && !form.ndaSignatureName.trim()) {
-        return setSubmitError('Please type your full legal name to sign the NDA')
+        return 'Please type your full legal name to sign the NDA'
       }
       if ((form.signatureMode === 'draw' || form.signatureMode === 'upload') && !form.ndaSignatureImage) {
-        return setSubmitError(form.signatureMode === 'draw' ? 'Please draw your signature' : 'Please upload your signature')
+        return form.signatureMode === 'draw' ? 'Please draw your signature' : 'Please upload your signature'
       }
     }
+    return ''
+  }
+
+  // "Submit for review" — validate, then open the preview/confirm modal.
+  function handleReviewSubmit() {
+    const err = validateOrg()
+    if (err) return setSubmitError(err)
+    setSubmitError('')
+    setShowPreview(true)
+  }
+
+  // Called by the modal's "Confirm & submit".
+  async function handleCreateOrg(sessionOverride) {
+    const err = validateOrg()
+    if (err) return setSubmitError(err)
 
     setSubmitting(true)
     setSubmitError('')
     try {
       if (!supabase) throw new Error(supabaseConfigMessage)
-      const { data: { session } } = await supabase.auth.getSession()
+      let session = (sessionOverride && sessionOverride.access_token) ? sessionOverride : null
+      if (!session) {
+        const { data } = await supabase.auth.getSession()
+        session = data.session
+      }
+
+      if (!session) {
+        const workEmail = form.orgEmail.trim().toLowerCase()
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email: workEmail,
+          options: { shouldCreateUser: true },
+        })
+        if (otpError) throw otpError
+        setOtpEmail(workEmail)
+        setOtpError('')
+        setShowOtpGate(true)
+        return
+      }
+
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/org-customers`, {
         method: 'POST',
         headers: {
@@ -1430,7 +1461,10 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
           retailer_type: form.retailerType,
           supplier_type: form.supplierType === 'Others' ? form.supplierTypeOther : form.supplierType,
           business_registration: form.registration,
-          categories: selectedCats,
+          categories: selectedCats.filter(id => id !== OTHER_CAT_ID),
+          ...(selectedCats.includes(OTHER_CAT_ID) && form.categoryOther.trim()
+            ? { category_other: form.categoryOther.trim() }
+            : {}),
           create_org: true,
           ...(role === 'supplier' && {
             cin_no: form.cin,
@@ -1445,7 +1479,6 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
             owner_name: form.ownerName,
             owner_email: form.ownerEmail,
             owner_phone: form.ownerPhone,
-            reason_for_contact: form.reasonForContact,
             logo_url: form.logoUrl,
             nda_accepted: true,
             nda_signature_type: MODE_TO_STORAGE[form.signatureMode],
@@ -1459,6 +1492,18 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
       if (!res.ok || !data.success) throw new Error(data.error || 'Submission failed')
 
       await markOnboardingComplete()
+      if (!currentUser?.id) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user?.id) {
+          await supabase.from('portal_users').upsert(
+            { id: user.id, email: user.email },
+            { onConflict: 'id', ignoreDuplicates: true },
+          )
+          await supabase.from('portal_users').update({ onboarding_completed: true }).eq('id', user.id)
+        }
+      }
+      setShowPreview(false)
+      setShowOtpGate(false)
       setPendingType('new')
       setStep(3)
     } catch (err) {
@@ -1468,11 +1513,38 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
     }
   }
 
+  async function handlePublicOtpComplete(code) {
+    setOtpError('')
+    setOtpVerifying(true)
+    try {
+      if (!supabase) throw new Error(supabaseConfigMessage)
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        email: otpEmail,
+        token: code,
+        type: 'email',
+      })
+      if (verifyError) throw verifyError
+      setCurrentUser(data.user)
+      setShowOtpGate(false)
+      await handleCreateOrg(data.session)
+    } catch (err) {
+      const msg = err.message?.toLowerCase() || ''
+      setOtpError(
+        msg.includes('expired') || msg.includes('invalid')
+          ? 'Incorrect or expired code. Please try again.'
+          : err.message || 'Verification failed. Please try again.'
+      )
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
+
+  const workEmail = email || form.orgEmail
   const logoSuffix = forcedRole === 'buyer' ? 'New Buyer Registration' : forcedRole === 'supplier' ? 'New Vendor Registration' : undefined
 
   // No router state: unauthenticated → will redirect to /auth via effect above.
-  // Authenticated → show spinner while profile loads and the guards redirect them.
-  if (!email) {
+  // Public vendor link has no router email — skip the spinner and show the form.
+  if (!email && !publicEntry) {
     return (
       <AuthShell>
         <AuthLogo suffix={logoSuffix} />
@@ -1529,12 +1601,21 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
           onClaim={handleClaimOrg}
           onCreateInstead={handleCreateInstead}
           onSelectSuggestion={handleSelectSuggestion}
-          onBack={() => {
+          onBack={async () => {
             setSuggestedOrg(null)
             // forcedRole flows never show the role picker — exit straight back
             // to the entrance page they came from instead of showing step 0.
-            if (forcedRole) navigate(`/auth/${forcedRole === 'buyer' ? 'buyer' : 'vendor'}`, { state: { email } })
-            else setStep(0)
+            if (forcedRole) {
+              // Leaving the flow entirely — discard the saved draft.
+              clearDraft()
+              // OTP is already verified here, so the session is live — without
+              // signing out, AuthPage's redirect guard bounces the user right
+              // back to this page. The next email submit signs out anyway.
+              if (supabase) await supabase.auth.signOut({ scope: 'local' })
+              navigate(`/auth/${forcedRole === 'buyer' ? 'buyer' : 'vendor'}`, { state: { email } })
+            } else {
+              setStep(0)
+            }
           }}
           submitting={submitting}
         />
@@ -1544,6 +1625,7 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
         <CreateOrgStep
           role={role}
           isVendorEntrance={isVendorEntrance}
+          publicEntry={publicEntry}
           form={form}
           setField={setField}
           categories={categories}
@@ -1551,15 +1633,47 @@ export default function OnboardingPage({ forcedRole: routeForcedRole }) {
           toggleCat={toggleCat}
           ndaChecks={ndaChecks}
           toggleNdaCheck={toggleNdaCheck}
-          error={submitError}
+          error={showPreview ? '' : submitError}
           submitting={submitting}
-          onSubmit={handleCreateOrg}
-          onBack={() => setStep(1)}
+          onSubmit={handleReviewSubmit}
+          onBack={publicEntry ? undefined : () => setStep(1)}
+        />
+      )}
+
+      {step === 2 && (
+        <ApplicationPreviewModal
+          open={showPreview}
+          data={{
+            form,
+            isVendorEntrance,
+            email: workEmail,
+            role,
+            categoryNames: [
+              ...categories.filter(c => selectedCats.includes(c.id)).map(c => c.name),
+              ...(selectedCats.includes(OTHER_CAT_ID) && form.categoryOther.trim()
+                ? [form.categoryOther.trim()]
+                : []),
+            ],
+          }}
+          submitting={submitting}
+          error={submitError}
+          onClose={() => setShowPreview(false)}
+          onConfirm={() => handleCreateOrg()}
         />
       )}
 
       {step === 3 && (
-        <PendingStep email={email} pendingType={pendingType} />
+        <PendingStep email={workEmail} pendingType={pendingType} />
+      )}
+
+      {showOtpGate && (
+        <PublicOtpGate
+          email={otpEmail}
+          verifying={otpVerifying}
+          error={otpError}
+          onVerified={handlePublicOtpComplete}
+          onCancel={() => { setShowOtpGate(false); setOtpError('') }}
+        />
       )}
     </AuthShell>
   )

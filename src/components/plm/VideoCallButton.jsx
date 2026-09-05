@@ -18,6 +18,10 @@ export default function VideoCallButton({ workspaceId, memberId, userName }) {
 
   const goToVedeeo = () => {
     if (!workspaceId || disabled) return
+    if (hasIncoming && incomingVideoCall.inviteId) {
+      navigate(`/plm/vedeeo?workspace=${workspaceId}&invite=${encodeURIComponent(incomingVideoCall.inviteId)}`)
+      return
+    }
     navigate(`/plm/vedeeo?workspace=${workspaceId}`)
   }
 

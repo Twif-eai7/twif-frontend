@@ -126,6 +126,26 @@ function Comment({ cm, onReply }) {
       </div>
     )
 
+    if (event === 'video_call_declined') return (
+      <div className="flex items-center justify-center gap-2 py-2.5">
+        <div className="flex-1 h-px bg-black/[.08]" />
+        <span className="text-[9px] font-bold uppercase tracking-[.06em] px-3 py-1 rounded-full bg-black/[.04] text-black">
+          Video call declined
+        </span>
+        <div className="flex-1 h-px bg-black/[.08]" />
+      </div>
+    )
+
+    if (event === 'video_call_cancelled') return (
+      <div className="flex items-center justify-center gap-2 py-2.5">
+        <div className="flex-1 h-px bg-black/[.08]" />
+        <span className="text-[9px] font-bold uppercase tracking-[.06em] px-3 py-1 rounded-full bg-black/[.04] text-black">
+          Video call cancelled
+        </span>
+        <div className="flex-1 h-px bg-black/[.08]" />
+      </div>
+    )
+
     if (event === 'video_call_invited') return (
       <div className="flex items-center justify-center gap-2 py-2.5">
         <div className="flex-1 h-px bg-black/[.08]" />

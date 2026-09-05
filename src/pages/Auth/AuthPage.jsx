@@ -25,9 +25,9 @@ const MODES = {
   },
 }
 
-export default function AuthPage({ forcedRole }) {
+export default function AuthPage({ forcedRole, defaultMode = 'login' }) {
   const { state } = useLocation()
-  const [mode, setMode] = useState('login')
+  const [mode, setMode] = useState(defaultMode)
   const [animating, setAnimating] = useState(false)
   const [email, setEmail] = useState(state?.email || '')
 

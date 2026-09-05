@@ -8,7 +8,7 @@ export default function IncomingCallBanner({ workspaceId, memberId }) {
   const navigate = useNavigate()
   const incomingVideoCall = usePlmStore(s => s.incomingVideoCall)
   const activeVideoCall   = usePlmStore(s => s.activeVideoCall)
-  const dismissIncomingCall = usePlmStore(s => s.dismissIncomingCall)
+  const declineVideoCall   = usePlmStore(s => s.declineVideoCall)
   const videoCallConnecting = usePlmStore(s => s.videoCallConnecting)
 
   if (!incomingVideoCall || incomingVideoCall.workspaceId !== workspaceId) return null
@@ -16,11 +16,23 @@ export default function IncomingCallBanner({ workspaceId, memberId }) {
 
   const joining = videoCallConnecting === workspaceId
   const label = incomingVideoCall.isInvite
-    ? `${incomingVideoCall.startedByName} invited you to join the video call`
-    : `${incomingVideoCall.startedByName} started a video call`
+    ? `${incomingVideoCall.startedByName} invited you to a video call`
+    : `${incomingVideoCall.startedByName} is calling you`
 
-  const handleJoin = () => {
-    navigate(`/plm/vedeeo?workspace=${workspaceId}`)
+  const handleAccept = () => {
+    const invite = incomingVideoCall.inviteId
+    const q = invite
+      ? `workspace=${workspaceId}&invite=${encodeURIComponent(invite)}`
+      : `workspace=${workspaceId}`
+    navigate(`/plm/vedeeo?${q}`)
+  }
+
+  const handleDecline = async () => {
+    try {
+      await declineVideoCall(workspaceId, memberId, incomingVideoCall.inviteId)
+    } catch {
+      // banner is cleared inside declineVideoCall; ignore network errors
+    }
   }
 
   return (
@@ -35,18 +47,19 @@ export default function IncomingCallBanner({ workspaceId, memberId }) {
       <div className="flex items-center gap-2 flex-shrink-0">
         <button
           type="button"
-          onClick={dismissIncomingCall}
-          className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.05em] text-black/45 hover:text-black/70 border border-black/15 bg-white rounded cursor-pointer"
+          onClick={handleDecline}
+          disabled={joining}
+          className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.05em] text-black/45 hover:text-black/70 border border-black/15 bg-white rounded cursor-pointer disabled:opacity-60"
         >
-          Dismiss
+          Decline
         </button>
         <button
           type="button"
-          onClick={handleJoin}
+          onClick={handleAccept}
           disabled={joining}
           className="px-3 py-1 text-[10px] font-bold uppercase tracking-[.05em] text-white bg-[#7c3aed] hover:bg-[#6d28d9] border-none rounded cursor-pointer disabled:opacity-60"
         >
-          {joining ? 'Joining…' : 'Join call'}
+          {joining ? 'Joining…' : 'Accept'}
         </button>
       </div>
     </div>

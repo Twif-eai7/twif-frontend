@@ -142,9 +142,12 @@ const MILESTONE_LABELS = {
   revision_requested: 'Revision Requested',
   sample_accepted:    'Sample Accepted',
   sample_rejected:    'Sample Rejected',
-  video_call_started: 'Video call started',
-  video_call_invited: 'Invited to join video call',
-  video_call_ended:   'Video call ended',
+  video_call_started:   'Video call started',
+  video_call_invited:   'Invited to join video call',
+  video_call_accepted:  'Video call accepted',
+  video_call_declined:  'Video call declined',
+  video_call_cancelled: 'Video call cancelled',
+  video_call_ended:     'Video call ended',
   status_changed_to_on_hold:  'Workspace On Hold',
   status_changed_to_rejected: 'Workspace Rejected',
   status_changed_to_active:   'Workspace Resumed',
@@ -339,8 +342,8 @@ export const usePlmStore = create(
       _catalogChannel:   null,
       _fetchCallId:      0,
       _memberNameMap:    {},   // memberId → display name
-      incomingVideoCall: null, // { workspaceId, startedBy, startedByName, isInvite }
-      activeVideoCall:   null, // { workspaceId, roomUrl, token }
+      incomingVideoCall: null, // { workspaceId, inviteId, startedBy, startedByName, isInvite, calleeUserId }
+      activeVideoCall:   null, // { workspaceId, joinUrl, inviteId, roomId, role, status }
       videoCallConnecting: null, // workspaceId while POST in flight
 
       // ── Fetch catalog ─────────────────────────────────────────────────────────
@@ -1528,27 +1531,35 @@ export const usePlmStore = create(
               return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...(s.activeWorkspace.npd_comments || []), named] } }
             }, false, 'plm/vcComment')
 
-            if (event === 'video_call_ended') {
+            if (event === 'video_call_ended' || event === 'video_call_declined' || event === 'video_call_cancelled') {
               set(s => ({
                 incomingVideoCall: s.incomingVideoCall?.workspaceId === workspaceId ? null : s.incomingVideoCall,
-                activeVideoCall: s.activeVideoCall?.workspaceId === workspaceId ? null : s.activeVideoCall,
+                activeVideoCall: event === 'video_call_ended' && s.activeVideoCall?.workspaceId === workspaceId
+                  ? null : s.activeVideoCall,
                 activeWorkspace: s.activeWorkspace?.id === workspaceId
                   ? { ...s.activeWorkspace, video_room_name: null, video_room_url: null }
                   : s.activeWorkspace,
-              }), false, 'plm/vcEnded')
+              }), false, event === 'video_call_ended' ? 'plm/vcEnded' : 'plm/vcClosed')
               return
             }
 
+            if (event === 'video_call_accepted') return
             if (row.author_member_id === myId) return
+
+            const calleeId = meta.calleeUserId
+            if (calleeId && calleeId !== myId) return
+            if (Array.isArray(meta.invited_member_ids) && meta.invited_member_ids.length && !meta.invited_member_ids.includes(myId)) return
 
             const alreadyRinging = get().incomingVideoCall?.workspaceId === workspaceId
             if (playSound && !alreadyRinging) playIncomingCallSound()
             set({
               incomingVideoCall: {
                 workspaceId,
+                inviteId: meta.inviteId || null,
                 startedBy: row.author_member_id,
                 startedByName: meta.started_by || meta.invited_by || 'Someone',
                 isInvite: event === 'video_call_invited',
+                calleeUserId: calleeId || myId,
               },
             }, false, 'plm/incomingCall')
           }
@@ -1571,15 +1582,29 @@ export const usePlmStore = create(
             })
             .on('broadcast', { event: 'video_call' }, ({ payload }) => {
               const myId = useProfileStore.getState().orgMembership?.memberId
-              if (!payload || payload.workspaceId !== workspaceId || payload.memberId === myId) return
+              if (!payload || payload.workspaceId !== workspaceId) return
+              if (payload.action === 'declined' || payload.action === 'cancelled' || payload.action === 'ended') {
+                set(s => ({
+                  incomingVideoCall: s.incomingVideoCall?.workspaceId === workspaceId ? null : s.incomingVideoCall,
+                  activeWorkspace: s.activeWorkspace?.id === workspaceId
+                    ? { ...s.activeWorkspace, video_room_name: null, video_room_url: null }
+                    : s.activeWorkspace,
+                }), false, 'plm/vcBroadcastClosed')
+                return
+              }
+              if (payload.memberId === myId) return
+              if (payload.calleeUserId && payload.calleeUserId !== myId) return
+              if (Array.isArray(payload.targetMemberIds) && payload.targetMemberIds.length && !payload.targetMemberIds.includes(myId)) return
               if (get().incomingVideoCall?.workspaceId === workspaceId) return
               playIncomingCallSound()
               set({
                 incomingVideoCall: {
                   workspaceId,
+                  inviteId: payload.inviteId || null,
                   startedBy: payload.memberId,
                   startedByName: payload.userName || 'Someone',
                   isInvite: payload.action === 'invite',
+                  calleeUserId: payload.calleeUserId || myId,
                 },
               }, false, 'plm/incomingCallBroadcast')
             })
@@ -1625,12 +1650,15 @@ export const usePlmStore = create(
             const myId = useProfileStore.getState().orgMembership?.memberId
             const lastStart = [...(workspace.npd_comments || [])].reverse()
               .find(c => c.metadata?.event === 'video_call_started')
-            if (lastStart?.author_member_id && lastStart.author_member_id !== myId) {
+            const calleeId = lastStart?.metadata?.calleeUserId
+            if (lastStart?.author_member_id && lastStart.author_member_id !== myId && (!calleeId || calleeId === myId)) {
               incomingRestore = {
                 workspaceId,
+                inviteId: lastStart.metadata?.inviteId || workspace.video_room_name,
                 startedBy: lastStart.author_member_id,
                 startedByName: lastStart.metadata?.started_by || 'Someone',
                 isInvite: false,
+                calleeUserId: calleeId || myId,
               }
             }
           }
@@ -1662,6 +1690,27 @@ export const usePlmStore = create(
             ).then(({ error }) => {
               if (error) console.error('[last_seen] upsert failed:', error.message, error.details, error.hint)
             })
+
+            if (!get().activeVideoCall) {
+              const session = useAuthStore.getState().session
+              fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call/pending?memberId=${encodeURIComponent(memberId)}`, {
+                headers: { Authorization: `Bearer ${session?.access_token}` },
+              }).then(r => r.ok ? r.json() : null).then(data => {
+                const first = data?.invites?.[0]
+                if (!first?.inviteId || get().activeVideoCall) return
+                const invite = first.invite || first
+                set({
+                  incomingVideoCall: {
+                    workspaceId,
+                    inviteId: first.inviteId,
+                    startedBy: invite.callerUserId || first.callerUserId,
+                    startedByName: invite.callerName || 'Someone',
+                    isInvite: true,
+                    calleeUserId: memberId,
+                  },
+                }, false, 'plm/pendingCall')
+              }).catch(() => {})
+            }
           }
         } catch {
           set({ workspaceLoading: false }, false, 'plm/wsError')
@@ -2359,35 +2408,42 @@ export const usePlmStore = create(
         }
       },
 
-      // ── Video calls ───────────────────────────────────────────────────────────
+      // ── Video calls (Vedeeo) ──────────────────────────────────────────────────
       dismissIncomingCall: () =>
         set({ incomingVideoCall: null }, false, 'plm/dismissCall'),
 
-      startVideoCall: async (workspaceId, memberId, userName) => {
+      startVideoCall: async (workspaceId, memberId, userName, targetMemberId) => {
         set({ videoCallConnecting: workspaceId }, false, 'plm/vcConnecting')
         try {
           const session = useAuthStore.getState().session
           const res = await fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-            body: JSON.stringify({ memberId, userName }),
+            body: JSON.stringify({ memberId, userName, targetMemberId }),
           })
           const data = await res.json().catch(() => ({}))
           if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
 
           set({
-            activeVideoCall: { workspaceId, roomUrl: data.roomUrl, token: data.token },
+            activeVideoCall: {
+              workspaceId,
+              joinUrl: data.joinUrl,
+              inviteId: data.inviteId,
+              roomId: data.roomId,
+              role: data.role,
+              status: data.status,
+            },
             incomingVideoCall: null,
             videoCallConnecting: null,
           }, false, 'plm/vcActive')
 
-          if (data.roomName) {
+          if (data.inviteId) {
             set(s => s.activeWorkspace?.id === workspaceId
-              ? { activeWorkspace: { ...s.activeWorkspace, video_room_name: data.roomName, video_room_url: data.roomUrl } }
+              ? { activeWorkspace: { ...s.activeWorkspace, video_room_name: data.inviteId, video_room_url: data.joinUrl } }
               : {}, false, 'plm/vcRoomActive')
           }
 
-          if (data.created && data.comment) {
+          if (data.comment) {
             const enriched = { ...mapComment(data.comment), author_name: userName }
             set(s => {
               if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
@@ -2398,7 +2454,18 @@ export const usePlmStore = create(
 
           const ch = get()._realtimeChannel
           if (ch && data.created) {
-            ch.send({ type: 'broadcast', event: 'video_call', payload: { action: 'started', memberId, userName, workspaceId } })
+            ch.send({
+              type: 'broadcast',
+              event: 'video_call',
+              payload: {
+                action: 'started',
+                memberId,
+                userName,
+                workspaceId,
+                inviteId: data.inviteId,
+                calleeUserId: data.calleeUserId,
+              },
+            })
           }
           return data
         } catch (err) {
@@ -2407,25 +2474,99 @@ export const usePlmStore = create(
         }
       },
 
+      acceptVideoCall: async (workspaceId, memberId, userName, inviteId) => {
+        set({ videoCallConnecting: workspaceId }, false, 'plm/vcConnecting')
+        try {
+          const session = useAuthStore.getState().session
+          const res = await fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+            body: JSON.stringify({ memberId, userName, inviteId }),
+          })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
+
+          set({
+            activeVideoCall: {
+              workspaceId,
+              joinUrl: data.joinUrl,
+              inviteId: data.inviteId,
+              roomId: data.roomId,
+              role: data.role || 'guest',
+              status: data.status,
+            },
+            incomingVideoCall: null,
+            videoCallConnecting: null,
+          }, false, 'plm/vcAccepted')
+          return data
+        } catch (err) {
+          set({ videoCallConnecting: null }, false, 'plm/vcAcceptError')
+          throw err
+        }
+      },
+
+      declineVideoCall: async (workspaceId, memberId, inviteId) => {
+        set({ incomingVideoCall: null }, false, 'plm/vcDecline')
+        const session = useAuthStore.getState().session
+        const res = await fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call/decline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ memberId, inviteId }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
+        const ch = get()._realtimeChannel
+        if (ch) {
+          ch.send({
+            type: 'broadcast',
+            event: 'video_call',
+            payload: { action: 'declined', memberId, workspaceId, inviteId },
+          })
+        }
+        if (data.comment) {
+          const enriched = { ...mapComment(data.comment) }
+          set(s => {
+            if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+            if (s.activeWorkspace.npd_comments?.some(c => c.id === enriched.id)) return {}
+            return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...(s.activeWorkspace.npd_comments || []), enriched] } }
+          }, false, 'plm/vcDeclineComment')
+        }
+        return data
+      },
+
       joinVideoCall: (workspaceId, memberId, userName) =>
         get().startVideoCall(workspaceId, memberId, userName),
 
       endVideoCall: async (workspaceId, memberId) => {
-        try {
-          const session = useAuthStore.getState().session
-          await fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call/end`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-            body: JSON.stringify({ memberId }),
-          })
-        } catch { /* best-effort */ }
+        const call = get().activeVideoCall
+        const isHost = call?.role === 'host'
+        if (isHost) {
+          try {
+            const session = useAuthStore.getState().session
+            await fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call/end`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+              body: JSON.stringify({ memberId, inviteId: call?.inviteId }),
+            })
+          } catch { /* best-effort */ }
+          const ch = get()._realtimeChannel
+          if (ch) {
+            ch.send({
+              type: 'broadcast',
+              event: 'video_call',
+              payload: { action: 'ended', memberId, workspaceId, inviteId: call?.inviteId },
+            })
+          }
+        }
         set({
           activeVideoCall: null,
           incomingVideoCall: null,
         }, false, 'plm/vcEnd')
-        set(s => s.activeWorkspace?.id === workspaceId
-          ? { activeWorkspace: { ...s.activeWorkspace, video_room_name: null, video_room_url: null } }
-          : {}, false, 'plm/vcRoomClear')
+        if (isHost) {
+          set(s => s.activeWorkspace?.id === workspaceId
+            ? { activeWorkspace: { ...s.activeWorkspace, video_room_name: null, video_room_url: null } }
+            : {}, false, 'plm/vcRoomClear')
+        }
       },
 
       inviteToVideoCall: async (workspaceId, memberId, userName, targetMemberIds, emails) => {
@@ -2449,7 +2590,18 @@ export const usePlmStore = create(
 
         const ch = get()._realtimeChannel
         if (ch) {
-          ch.send({ type: 'broadcast', event: 'video_call', payload: { action: 'invite', memberId, userName, workspaceId } })
+          ch.send({
+            type: 'broadcast',
+            event: 'video_call',
+            payload: {
+              action: 'invite',
+              memberId,
+              userName,
+              workspaceId,
+              inviteId: get().activeVideoCall?.inviteId,
+              targetMemberIds,
+            },
+          })
           if (data.comment) {
             ch.send({ type: 'broadcast', event: 'comment', payload: { ...mapComment(data.comment), author_name: userName } })
           }

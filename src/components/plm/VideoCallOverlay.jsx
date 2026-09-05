@@ -1,17 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
-import DailyIframe from '@daily-co/daily-js'
 import { usePlmStore } from '../../stores/plmStore'
-
-/** Daily allows only one iframe instance globally — tear down any leftover instance. */
-async function destroyExistingDailyInstance() {
-  const existing = DailyIframe.getCallInstance()
-  if (!existing) return
-  try {
-    await existing.destroy()
-  } catch {
-    // already destroyed or mid-teardown
-  }
-}
 
 function workspaceParticipants(ws, myMemberId) {
   if (!ws) return []
@@ -28,12 +16,10 @@ function workspaceParticipants(ws, myMemberId) {
   return list
 }
 
-export default function VideoCallOverlay({ workspaceId, memberId, userName, roomUrl, token, onLeave, fullPage = false }) {
+export default function VideoCallOverlay({ workspaceId, memberId, userName, joinUrl, onLeave, fullPage = false }) {
   const inviteToVideoCall = usePlmStore(s => s.inviteToVideoCall)
   const activeWorkspace   = usePlmStore(s => s.activeWorkspace)
 
-  const containerRef = useRef(null)
-  const callFrameRef = useRef(null)
   const invitePanelRef = useRef(null)
   const onLeaveRef = useRef(onLeave)
   const leavingRef = useRef(false)
@@ -65,24 +51,11 @@ export default function VideoCallOverlay({ workspaceId, memberId, userName, room
 
   onLeaveRef.current = onLeave
 
-  const destroyCallFrame = useCallback(async () => {
-    const frame = callFrameRef.current ?? DailyIframe.getCallInstance()
-    callFrameRef.current = null
-    if (!frame) return
-    try {
-      await frame.destroy()
-    } catch {
-      // ignore
-    }
-  }, [])
-
   const handleLeave = useCallback(() => {
     if (leavingRef.current) return
     leavingRef.current = true
-    destroyCallFrame().finally(() => {
-      onLeaveRef.current?.()
-    })
-  }, [destroyCallFrame])
+    onLeaveRef.current?.()
+  }, [])
 
   const toggleParticipant = (id) => {
     setSelectedIds(prev =>
@@ -118,66 +91,12 @@ export default function VideoCallOverlay({ workspaceId, memberId, userName, room
   }
 
   useEffect(() => {
-    if (!containerRef.current || !roomUrl || !token) return
-
-    let cancelled = false
-    let callFrame = null
-
-    const setup = async () => {
-      await destroyExistingDailyInstance()
-      if (cancelled || !containerRef.current) return
-
-      callFrame = DailyIframe.createFrame(containerRef.current, {
-        iframeStyle: {
-          position: 'absolute',
-          top:      '0',
-          left:     '0',
-          width:    '100%',
-          height:   '100%',
-          border:   'none',
-        },
-        showLeaveButton:      true,
-        showFullscreenButton: true,
-        showParticipantsBar:  'auto',
-      })
-      if (cancelled) {
-        await callFrame.destroy().catch(() => {})
-        return
-      }
-
-      callFrameRef.current = callFrame
-      callFrame.join({ url: roomUrl, token })
-
-      callFrame.on('left-meeting', handleLeave)
-      callFrame.on('error', (e) => {
-        console.error('Daily call error:', e)
-        handleLeave()
-      })
-    }
-
-    setup().catch((err) => {
-      console.error('Failed to start Daily call frame:', err)
-      handleLeave()
-    })
-
     const onKey = (e) => {
-      if (e.key === 'Escape') {
-        callFrameRef.current?.leave().catch(() => {})
-        handleLeave()
-      }
+      if (e.key === 'Escape') handleLeave()
     }
     window.addEventListener('keydown', onKey)
-
-    return () => {
-      cancelled = true
-      window.removeEventListener('keydown', onKey)
-      const frame = callFrame ?? callFrameRef.current
-      callFrameRef.current = null
-      if (frame) {
-        frame.destroy().catch(() => {})
-      }
-    }
-  }, [roomUrl, token, handleLeave])
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleLeave])
 
   return (
     <div className={`${fullPage ? 'min-h-screen w-full' : 'fixed inset-0 z-[9999]'} flex flex-col bg-[#0a0a09]`}>
@@ -261,10 +180,7 @@ export default function VideoCallOverlay({ workspaceId, memberId, userName, room
           </span>
           <button
             type="button"
-            onClick={() => {
-              callFrameRef.current?.leave().catch(() => {})
-              handleLeave()
-            }}
+            onClick={handleLeave}
             className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-[10px] font-bold uppercase tracking-[.08em] text-white border-none cursor-pointer transition-colors rounded-sm"
           >
             Leave Call
@@ -272,7 +188,17 @@ export default function VideoCallOverlay({ workspaceId, memberId, userName, room
         </div>
       </div>
 
-      <div ref={containerRef} className="flex-1 relative" />
+      <div className="flex-1 relative bg-black">
+        {joinUrl ? (
+          <iframe
+            title="Video call"
+            src={joinUrl}
+            allow="camera; microphone; autoplay; display-capture"
+            className="absolute inset-0 w-full h-full border-0"
+            allowFullScreen
+          />
+        ) : null}
+      </div>
     </div>
   )
 }

@@ -86,6 +86,8 @@ export default function App() {
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/auth/buyer" element={<AuthPage forcedRole="buyer" />} />
           <Route path="/auth/vendor" element={<AuthPage forcedRole="supplier" />} />
+          <Route path="/register/vendor" element={<OnboardingPage forcedRole="supplier" publicEntry />} />
+          <Route path="/vendor-registration" element={<Navigate to="/register/vendor" replace />} />
           <Route path="/auth/vendor/verify-otp" element={<OTPPage forcedRole="supplier" />} />
           <Route path="/auth/vendor/onboarding_vendor" element={<OnboardingPage forcedRole="supplier" />} />
           <Route path="/verify-otp" element={<OTPPage />} />
