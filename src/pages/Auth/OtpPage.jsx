@@ -19,7 +19,11 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
   const [error, setError] = useState('')
 
   const { onboardingCompleted, loading: portalLoading } = usePortalUser(verifiedUser)
-  const { secondsLeft, canResend, resending, resendError, resend } = useOTPTimer(email, mode)
+  const { secondsLeft, canResend, resending, resendError, resend } = useOTPTimer(
+    email,
+    mode,
+    forcedRole === 'supplier' ? '/auth/vendor' : '/auth',
+  )
 
   const authPath = forcedRole === 'supplier' ? '/auth/vendor' : forcedRole === 'buyer' ? '/auth/buyer' : '/auth'
 
@@ -45,12 +49,19 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
       if (!supabase) return
       const { data } = await supabase
         .from('organization_members')
-        .select('role, organizations!inner(type)')
+        .select('role, organizations!inner(type, status)')
         .eq('user_id', verifiedUser.id)
         .maybeSingle()
 
       const orgType = data?.organizations?.type
+      const orgStatus = data?.organizations?.status
       const role    = data?.role
+
+      if (orgStatus === 'pending' || orgStatus === 'rejected' || orgStatus === 'suspended') {
+        const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
+        navigate(onboardingPath, { state: { email, pendingReview: true, forcedRole }, replace: true })
+        return
+      }
 
       if (orgType === 'merchant') {
         navigate(

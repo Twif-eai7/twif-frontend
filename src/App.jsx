@@ -32,7 +32,7 @@ import SignatureSettingsPage from './pages/Admin/SignatureSettingsPage'
 
 import { useAuth } from './hooks/useAuth'
 import { useRecentWorkspaces } from './hooks/useRecentWorkspaces'
-import { useProfileStore } from './stores/profileStore'
+import { isOrgLive, useProfileStore } from './stores/profileStore'
 import { Spinner } from './components/ui'
 
 /**
@@ -67,8 +67,8 @@ function RequireAuth({ children }) {
       return <Navigate to="/onboarding" state={{ email: user?.email }} replace />
     }
 
-    // Form submitted but account still pending review (no approved org membership)
-    if (!orgMembership) {
+    // Form submitted but org is still pending review (or no membership yet)
+    if (!isOrgLive(orgMembership)) {
       return <Navigate to="/onboarding" state={{ email: user?.email, pendingReview: true }} replace />
     }
   }
@@ -121,6 +121,7 @@ export default function App() {
 
           {/* Admin */}
           <Route path="/admin" element={<Navigate to="/admin/approvals" replace />} />
+          <Route path="/dashboard/approvals" element={<LegacyApprovalsRedirect />} />
           <Route path="/admin/approvals"    element={<RequireAuth><ApprovalsPage /></RequireAuth>} />
           <Route path="/admin/organisations" element={<RequireAuth><OrganisationsPage /></RequireAuth>} />
           <Route path="/admin/members"      element={<RequireAuth><MembersPage /></RequireAuth>} />
@@ -133,6 +134,11 @@ export default function App() {
       </AuthProvider>
     </BrowserRouter>
   )
+}
+
+function LegacyApprovalsRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/admin/approvals${search}`} replace />
 }
 
 function wsInitials(supplier, label) {

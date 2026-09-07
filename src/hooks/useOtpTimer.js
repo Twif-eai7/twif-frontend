@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, supabaseConfigMessage } from '../lib/supabase'
+import { otpEmailOptions } from '../lib/authRedirect'
 
 const RESEND_DELAY = 60 // seconds
 
-export function useOTPTimer(email, mode) {
+export function useOTPTimer(email, mode, redirectPath = '/auth') {
   const [secondsLeft, setSecondsLeft] = useState(RESEND_DELAY)
   const [canResend, setCanResend] = useState(false)
   const [resending, setResending] = useState(false)
@@ -29,7 +30,10 @@ export function useOTPTimer(email, mode) {
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { shouldCreateUser: mode === 'signup' },
+        options: otpEmailOptions({
+          shouldCreateUser: mode === 'signup',
+          path: redirectPath,
+        }),
       })
       if (error) throw error
       setSecondsLeft(RESEND_DELAY)
@@ -39,7 +43,7 @@ export function useOTPTimer(email, mode) {
     } finally {
       setResending(false)
     }
-  }, [canResend, resending, email, mode])
+  }, [canResend, resending, email, mode, redirectPath])
 
   return { secondsLeft, canResend, resending, resendError, resend }
 }

@@ -9,6 +9,13 @@ const ORG_TYPE_TO_ROLE = {
   supplier: 'Supplier',
 }
 
+/** Pending/rejected/suspended orgs must not get portal access. Null status = ERP import (live). */
+export function isOrgLive(orgMembership) {
+  if (!orgMembership) return false
+  const s = orgMembership.orgStatus
+  return s !== 'pending' && s !== 'rejected' && s !== 'suspended'
+}
+
 function computeProfileHeader(pu, orgMembership) {
   if (!pu && !orgMembership) return null
   const fullName     = orgMembership?.fullName || ''
@@ -62,7 +69,7 @@ export const useProfileStore = create(
 
           const { data: om, error: omErr } = await supabase
             .from('organization_members')
-            .select('id, role, full_name, department, allowed_modules, assigned_regions, organizations(id, type, name, display_name)')
+            .select('id, role, full_name, department, allowed_modules, assigned_regions, organizations(id, type, name, display_name, status, logo_url)')
             .eq('user_id', userId)
             .maybeSingle()
 
@@ -77,6 +84,7 @@ export const useProfileStore = create(
                 orgName: org.name,
                 orgDisplayName: org.display_name,
                 orgLogoUrl: org.logo_url,
+                orgStatus: org.status || null,
                 role: om.role,
                 fullName: om.full_name || null,
                 department: om.department || null,

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, supabaseConfigMessage } from '../lib/supabase'
 import { isValidEmail } from '../utils/validators'
+import { otpEmailOptions } from '../lib/authRedirect'
 
 /**
  * useEmailAuth
@@ -42,7 +43,10 @@ export function useEmailAuth(mode, returnUrl, forcedRole, otpPath = '/verify-otp
 
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: normalised,
-        options: { shouldCreateUser: mode === 'signup' },
+        options: otpEmailOptions({
+          shouldCreateUser: mode === 'signup',
+          path: forcedRole === 'supplier' ? '/auth/vendor' : forcedRole === 'buyer' ? '/auth/buyer' : '/auth',
+        }),
       })
 
       if (otpError) {

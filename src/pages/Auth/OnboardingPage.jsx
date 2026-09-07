@@ -9,11 +9,12 @@ import NdaAgreementText from '../../components/shared/NdaAgreementText'
 import { MODE_TO_STORAGE } from '../../lib/signatureMode'
 import { useOrgLookup } from '../../hooks/useOrgLookup'
 import { usePortalUser } from '../../hooks/usePortalUser'
-import { useProfileStore } from '../../stores/profileStore'
+import { isOrgLive, useProfileStore } from '../../stores/profileStore'
 import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
 import { formatErrorFor, GSTIN_RE, INDIA_PIN_RE } from '../../utils/fieldFormats'
 import ApplicationPreviewModal from './ApplicationPreviewModal'
+import { otpEmailOptions } from '../../lib/authRedirect'
 
 // ─── Constants ────────────────────────────────────────────────
 const COUNTRIES = [
@@ -1087,7 +1088,7 @@ function clearDraft() {
 const OTP_LENGTH = 8
 
 function PublicOtpGate({ email, onVerified, onCancel, verifying, error }) {
-  const { secondsLeft, canResend, resending, resendError, resend } = useOTPTimer(email, 'signup')
+  const { secondsLeft, canResend, resending, resendError, resend } = useOTPTimer(email, 'signup', '/register/vendor')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4">
@@ -1232,13 +1233,12 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
   }, [email, session, authLoading, navigate, publicEntry])
 
   // Guard: already onboarded AND approved → send to dashboard
-  // Skip for public vendor registration (website button) and pendingReview.
   useEffect(() => {
     if (publicEntry) return
-    if (!pendingReview && profileFetched && portalUser?.onboarding_completed) {
+    if (!pendingReview && profileFetched && portalUser?.onboarding_completed && isOrgLive(orgMembership)) {
       navigate('/dashboard', { replace: true })
     }
-  }, [pendingReview, profileFetched, portalUser, navigate, publicEntry])
+  }, [pendingReview, profileFetched, portalUser, orgMembership, navigate, publicEntry])
 
   // Poll for approval when on the pending review screen.
   // Refreshes the profile every 10s — redirects to dashboard as soon as org membership appears.
@@ -1253,7 +1253,7 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
   }, [pendingReview, currentUser?.id])
 
   useEffect(() => {
-    if (pendingReview && orgMembership) {
+    if (pendingReview && isOrgLive(orgMembership)) {
       navigate('/dashboard', { replace: true })
     }
   }, [pendingReview, orgMembership, navigate])
@@ -1430,11 +1430,16 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
         session = data.session
       }
 
+      const workEmail = form.orgEmail.trim().toLowerCase()
+      if (session?.user?.email && session.user.email.toLowerCase() !== workEmail) {
+        await supabase.auth.signOut({ scope: 'local' })
+        session = null
+      }
+
       if (!session) {
-        const workEmail = form.orgEmail.trim().toLowerCase()
         const { error: otpError } = await supabase.auth.signInWithOtp({
           email: workEmail,
-          options: { shouldCreateUser: true },
+          options: otpEmailOptions({ shouldCreateUser: true, path: '/register/vendor' }),
         })
         if (otpError) throw otpError
         setOtpEmail(workEmail)
@@ -1488,8 +1493,18 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
           }),
         }),
       })
-      const data = await res.json()
-      if (!res.ok || !data.success) throw new Error(data.error || 'Submission failed')
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 409 && data.pending) {
+        await markOnboardingComplete()
+        setShowPreview(false)
+        setShowOtpGate(false)
+        setPendingType('new')
+        setStep(3)
+        return
+      }
+      if (!res.ok || !data.success) {
+        throw new Error(data.details ? `${data.error}: ${data.details}` : (data.error || 'Submission failed'))
+      }
 
       await markOnboardingComplete()
       if (!currentUser?.id) {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAdminCheck } from '../../hooks/useAdminCheck'
 import { useApprovals } from '../../hooks/useApprovals'
 import { useAuth } from '../../hooks/useAuth'
@@ -231,7 +232,8 @@ export default function ApprovalsPage() {
     previewOrgPdf, verifyOrg, signOrg,
   } = useApprovals()
 
-  const [tab, setTab] = useState('requests') // 'requests' | 'orgs'
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(() => (searchParams.get('tab') === 'orgs' ? 'orgs' : 'requests')) // 'requests' | 'orgs'
   const [rejectTarget, setRejectTarget] = useState(null) // { id, type: 'request'|'org', name }
   const [previewTarget, setPreviewTarget] = useState(null) // { id, name }
   const [signTarget, setSignTarget] = useState(null) // { id, name }

@@ -4,7 +4,7 @@ import { AuthSplitLayout, AuthEmailField, AuthGradientButton } from '../../compo
 import { Alert } from '../../components/ui'
 import { useEmailAuth } from '../../hooks/useEmailAuth'
 import { useAuth } from '../../hooks/useAuth'
-import { useProfileStore } from '../../stores/profileStore'
+import { isOrgLive, useProfileStore } from '../../stores/profileStore'
 
 const MODES = {
   login: {
@@ -55,7 +55,7 @@ export default function AuthPage({ forcedRole, defaultMode = 'login' }) {
       return
     }
 
-    if (!orgMembership) {
+    if (!isOrgLive(orgMembership)) {
       navigate(onboardingPath, { state: { email: user?.email, pendingReview: true, forcedRole }, replace: true })
       return
     }
