@@ -14,7 +14,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
 import { formatErrorFor, GSTIN_RE, INDIA_PIN_RE } from '../../utils/fieldFormats'
 import ApplicationPreviewModal from './ApplicationPreviewModal'
-import { otpEmailOptions } from '../../lib/authRedirect'
+import { sendAuthOtp, verifyEmailOtp } from '../../lib/authOtp'
 
 // ─── Constants ────────────────────────────────────────────────
 const COUNTRIES = [
@@ -1437,11 +1437,7 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
       }
 
       if (!session) {
-        const { error: otpError } = await supabase.auth.signInWithOtp({
-          email: workEmail,
-          options: otpEmailOptions({ shouldCreateUser: true, path: '/register/vendor' }),
-        })
-        if (otpError) throw otpError
+        await sendAuthOtp(workEmail, { shouldCreateUser: true, path: '/register/vendor' })
         setOtpEmail(workEmail)
         setOtpError('')
         setShowOtpGate(true)
@@ -1494,16 +1490,19 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
         }),
       })
       const data = await res.json().catch(() => ({}))
-      if (res.status === 409 && data.pending) {
-        await markOnboardingComplete()
-        setShowPreview(false)
-        setShowOtpGate(false)
-        setPendingType('new')
-        setStep(3)
-        return
+      if (res.status === 409 && (data.pending || /already registered|already submitted/i.test(data.error || ''))) {
+        if (data.pending || /already submitted/i.test(data.error || '')) {
+          await markOnboardingComplete()
+          setShowPreview(false)
+          setShowOtpGate(false)
+          setPendingType('new')
+          setStep(3)
+          return
+        }
+        throw new Error(data.error || 'This email is already registered. Please sign in.')
       }
       if (!res.ok || !data.success) {
-        throw new Error(data.details ? `${data.error}: ${data.details}` : (data.error || 'Submission failed'))
+        throw new Error(data.error || data.details || 'Submission failed')
       }
 
       await markOnboardingComplete()
@@ -1533,12 +1532,7 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
     setOtpVerifying(true)
     try {
       if (!supabase) throw new Error(supabaseConfigMessage)
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email: otpEmail,
-        token: code,
-        type: 'email',
-      })
-      if (verifyError) throw verifyError
+      const data = await verifyEmailOtp(otpEmail, code)
       setCurrentUser(data.user)
       setShowOtpGate(false)
       await handleCreateOrg(data.session)

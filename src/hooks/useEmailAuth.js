@@ -2,12 +2,12 @@ import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, supabaseConfigMessage } from '../lib/supabase'
 import { isValidEmail } from '../utils/validators'
-import { otpEmailOptions } from '../lib/authRedirect'
+import { sendAuthOtp } from '../lib/authOtp'
 
 /**
  * useEmailAuth
  *
- * Single responsibility: send the OTP email via Supabase Auth.
+ * Single responsibility: send the OTP email (backend OTP, not a magic link).
  *
  * Usage in AuthPage:
  *   const { submit, loading, error, clearError } = useEmailAuth(mode)
@@ -41,25 +41,10 @@ export function useEmailAuth(mode, returnUrl, forcedRole, otpPath = '/verify-otp
       // or invalidating the new OTP due to session conflicts.
       await supabase.auth.signOut({ scope: 'local' })
 
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: normalised,
-        options: otpEmailOptions({
-          shouldCreateUser: mode === 'signup',
-          path: forcedRole === 'supplier' ? '/auth/vendor' : forcedRole === 'buyer' ? '/auth/buyer' : '/auth',
-        }),
+      await sendAuthOtp(normalised, {
+        shouldCreateUser: mode === 'signup',
+        path: forcedRole === 'supplier' ? '/auth/vendor' : forcedRole === 'buyer' ? '/auth/buyer' : '/auth',
       })
-
-      if (otpError) {
-        const otpMsg = typeof otpError.message === 'string' ? otpError.message : ''
-        if (
-          mode === 'login' &&
-          (otpMsg.toLowerCase().includes('not found') ||
-            otpMsg.toLowerCase().includes('signups not allowed'))
-        ) {
-          return setError('No account found with that email. Try requesting access instead.')
-        }
-        throw otpError
-      }
 
       navigate(otpPath, { state: { email: normalised, mode, returnUrl, forcedRole }, replace: true })
 

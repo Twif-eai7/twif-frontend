@@ -5,6 +5,7 @@ import { AuthSplitLayout } from '../../components/auth'
 import { OTPInput, Alert, Spinner } from '../../components/ui'
 import { useOTPTimer } from '../../hooks/useOtpTimer'
 import { usePortalUser } from '../../hooks/usePortalUser'
+import { verifyEmailOtp } from '../../lib/authOtp'
 
 const OTP_LENGTH = 8
 
@@ -85,12 +86,7 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
       return
     }
     try {
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: code,
-        type: 'email',
-      })
-      if (verifyError) throw verifyError
+      const data = await verifyEmailOtp(email, code)
       setVerifiedUser(data.user)
     } catch (err) {
       const msg = err.message?.toLowerCase() || ''
