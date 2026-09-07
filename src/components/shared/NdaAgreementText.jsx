@@ -23,7 +23,7 @@ export default function NdaAgreementText({ businessName, address, className }) {
 
       <p className="font-bold text-stone-900 mb-1">BETWEEN</p>
       <p className="mb-3">
-        <strong>Twif Technologies Private Limited</strong>, having its offices in Bangalore, India, with global headquarters in Singapore (hereinafter referred to as <strong>"Twif"</strong>, which
+        <strong>Twif Technologies PTE LTD</strong>, having its headquarters in Singapore and a hub office in Bengaluru, India (hereinafter referred to as <strong>"Twif"</strong>, which
         expression shall include its successors, affiliates and permitted assigns);
       </p>
 
@@ -253,14 +253,14 @@ export default function NdaAgreementText({ businessName, address, className }) {
       <p className="text-sm font-bold text-stone-900 mt-3 mb-1">13. DISPUTE RESOLUTION</p>
       <p className="mb-3">
         The Parties shall first attempt to resolve disputes amicably. Failing resolution within
-        thirty (30) days, disputes shall be referred to arbitration under the Arbitration and
-        Conciliation Act, 1996. Seat of arbitration: Bangalore, India. Language: English. The
-        arbitration award shall be final and binding.
+        thirty (30) days, disputes shall be referred to arbitration in Singapore under the
+        Arbitration Rules of the Singapore International Arbitration Centre (SIAC). Seat of
+        arbitration: Singapore. Language: English. The arbitration award shall be final and binding.
       </p>
 
       <p className="text-sm font-bold text-stone-900 mt-3 mb-1">14. GOVERNING LAW</p>
       <p className="mb-3">
-        This Agreement shall be governed by the laws of India. Courts at Bangalore, India shall
+        This Agreement shall be governed by the laws of Singapore. Courts of Singapore shall
         have exclusive jurisdiction for interim and enforcement proceedings.
       </p>
 
@@ -288,7 +288,7 @@ export default function NdaAgreementText({ businessName, address, className }) {
         <p className="font-semibold text-stone-700 mb-2">Buyer Exclusivity &amp; Product Development Protocol</p>
         <p className="mb-2">
           This Schedule forms an integral part of the Master Non-Disclosure, Non-Circumvention &amp;
-          Non-Solicitation Agreement entered into between Twif Technologies Private Limited ("Twif") and the Vendor.
+          Non-Solicitation Agreement entered into between Twif Technologies PTE LTD ("Twif") and the Vendor.
         </p>
 
         <p className="font-bold text-stone-800 mt-2 mb-0.5">1. Buyer Exclusivity</p>

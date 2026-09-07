@@ -31,7 +31,7 @@ const SCOPE_TAGS = [
 ];
 
 const COMPANY_INFO = [
-  { label: "Location", value: "Gurugram, Haryana – 122001, India" },
+  { label: "Location", value: "HQ: Singapore · Hub: Bengaluru, India" },
   { label: "Standard", value: "ISO 9001:2015"                     },
 ];
 
@@ -282,7 +282,7 @@ export default function QualityManual() {
           <section id="qm-profile" data-qm-section className="mb-12 scroll-mt-6">
             <SectionHead number="03" title="Company Profile" />
             <p className="text-sm text-gray-500 leading-relaxed mb-4">
-              Twif Technologies, headquartered in Singapore and Bangalore, serves as a professional buying house
+              Twif Technologies PTE LTD, headquartered in Singapore with a hub office in Bengaluru, serves as a professional buying house
               connecting international buyers with verified Indian manufacturers. The company
               specialises in end-to-end sourcing solutions — from vendor selection and sampling to
               production follow-up, inspection, and shipment coordination.
