@@ -39,8 +39,7 @@ export default function PLMVedeeoPage() {
   useEffect(() => {
     if (!workspaceId || !memberId) return
     if (activeVideoCall?.workspaceId === workspaceId && activeVideoCall.joinUrl) return
-    if (videoCallConnecting === workspaceId) return
-    if (startedRef.current) return
+    if (startedRef.current || videoCallConnecting === workspaceId) return
 
     startedRef.current = true
     const run = inviteId
@@ -52,11 +51,7 @@ export default function PLMVedeeoPage() {
       alert('Could not start video call: ' + err.message)
       navigate(`/plm?workspace=${workspaceId}`, { replace: true })
     })
-  }, [
-    workspaceId, memberId, userName, inviteId,
-    activeVideoCall, videoCallConnecting,
-    startVideoCall, acceptVideoCall, navigate,
-  ])
+  }, [workspaceId, memberId, userName, inviteId])
 
   const handleLeave = async () => {
     if (workspaceId && memberId) {
@@ -73,17 +68,17 @@ export default function PLMVedeeoPage() {
     )
   }
 
-  const isReady = activeVideoCall?.workspaceId === workspaceId && activeVideoCall.joinUrl
-  const isConnecting = videoCallConnecting === workspaceId
+  const joinUrl = activeVideoCall?.workspaceId === workspaceId ? activeVideoCall.joinUrl : null
+  const isConnecting = videoCallConnecting === workspaceId || (!joinUrl && startedRef.current)
 
-  if (isReady) {
+  if (joinUrl) {
     return (
       <VideoCallOverlay
         fullPage
         workspaceId={workspaceId}
         memberId={memberId}
         userName={userName}
-        joinUrl={activeVideoCall.joinUrl}
+        joinUrl={joinUrl}
         onLeave={handleLeave}
       />
     )

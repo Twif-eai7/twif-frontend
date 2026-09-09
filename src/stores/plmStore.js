@@ -4,6 +4,7 @@ import { useAuthStore } from './authStore'
 import { useProfileStore } from './profileStore'
 import { supabase } from '../lib/supabase'
 import { playIncomingCallSound } from '../utils/callSound'
+import { pickJoinUrl, toEmbedJoinUrl } from '../lib/videoCall'
 
 
 function parseCommentMeta(metadata) {
@@ -12,6 +13,12 @@ function parseCommentMeta(metadata) {
     try { return JSON.parse(metadata) } catch { return {} }
   }
   return metadata
+}
+
+function callJoinUrl(data, userName) {
+  const raw = pickJoinUrl(data, data?.role)
+  if (!raw) throw new Error('Video call started but no join link was returned')
+  return toEmbedJoinUrl(raw, userName || data?.invite?.callerName || data?.invite?.calleeName)
 }
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL
@@ -2424,10 +2431,11 @@ export const usePlmStore = create(
           const data = await res.json().catch(() => ({}))
           if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
 
+          const joinUrl = callJoinUrl(data, userName)
           set({
             activeVideoCall: {
               workspaceId,
-              joinUrl: data.joinUrl,
+              joinUrl,
               inviteId: data.inviteId,
               roomId: data.roomId,
               role: data.role,
@@ -2439,7 +2447,7 @@ export const usePlmStore = create(
 
           if (data.inviteId) {
             set(s => s.activeWorkspace?.id === workspaceId
-              ? { activeWorkspace: { ...s.activeWorkspace, video_room_name: data.inviteId, video_room_url: data.joinUrl } }
+              ? { activeWorkspace: { ...s.activeWorkspace, video_room_name: data.inviteId, video_room_url: joinUrl } }
               : {}, false, 'plm/vcRoomActive')
           }
 
@@ -2486,10 +2494,11 @@ export const usePlmStore = create(
           const data = await res.json().catch(() => ({}))
           if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
 
+          const joinUrl = callJoinUrl({ ...data, role: data.role || 'guest' }, userName)
           set({
             activeVideoCall: {
               workspaceId,
-              joinUrl: data.joinUrl,
+              joinUrl,
               inviteId: data.inviteId,
               roomId: data.roomId,
               role: data.role || 'guest',

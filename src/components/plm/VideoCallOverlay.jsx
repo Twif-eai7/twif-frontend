@@ -175,6 +175,14 @@ export default function VideoCallOverlay({ workspaceId, memberId, userName, join
               </div>
             )}
           </div>
+          <a
+            href={joinUrl || '#'}
+            target="_blank"
+            rel="noreferrer"
+            className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-white/70 hover:text-white no-underline"
+          >
+            Open in new tab
+          </a>
           <span className="text-[10px] font-medium tracking-[.04em] text-white/30 uppercase hidden sm:inline">
             Press Esc to leave
           </span>
