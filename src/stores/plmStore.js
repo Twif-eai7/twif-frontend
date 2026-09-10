@@ -266,6 +266,79 @@ async function fetchMemberNameMap(memberIds) {
   )
 }
 
+const SUPPLIER_SKU_SELECT = '*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )'
+const SUPPLIER_WS_SELECT = 'catalog_sku_id, id, status, supplier_org_id, supplier_member_id, buyer_ref, buyer_brief, origin, reference_media'
+
+async function fetchSupplierCatalogSkus(memberId) {
+  const email = (useAuthStore.getState().session?.user?.email || '').toLowerCase().trim()
+
+  const [wsMemberRes, inviteRes] = await Promise.all([
+    memberId
+      ? supabase.from('npd2_workspaces').select(SUPPLIER_WS_SELECT).eq('supplier_member_id', memberId)
+      : Promise.resolve({ data: [] }),
+    Promise.all([
+      email
+        ? supabase.from('npd2_invites')
+            .select('workspace_id')
+            .eq('email', email)
+            .in('role', ['supplier', 'vendor'])
+            .in('status', ['pending', 'accepted'])
+        : Promise.resolve({ data: [] }),
+      memberId
+        ? supabase.from('npd2_invites')
+            .select('workspace_id')
+            .eq('member_id', memberId)
+            .in('role', ['supplier', 'vendor'])
+            .in('status', ['pending', 'accepted'])
+        : Promise.resolve({ data: [] }),
+    ]).then(([byEmail, byMember]) => ({
+      data: [...(byEmail.data || []), ...(byMember.data || [])],
+    })),
+  ])
+
+  const inviteWsIds = [...new Set((inviteRes.data || []).map(i => i.workspace_id).filter(Boolean))]
+  let wsInviteData = []
+  if (inviteWsIds.length) {
+    const { data } = await supabase.from('npd2_workspaces').select(SUPPLIER_WS_SELECT).in('id', inviteWsIds)
+    wsInviteData = data || []
+  }
+
+  const invitedWsIds = new Set(inviteWsIds)
+  const wsMap = {}
+  for (const w of [...(wsMemberRes.data || []), ...wsInviteData]) {
+    if (!w?.catalog_sku_id) continue
+    if (!wsMap[w.catalog_sku_id]) wsMap[w.catalog_sku_id] = w
+    if (w.id && (w.supplier_member_id === memberId || inviteWsIds.includes(w.id))) {
+      invitedWsIds.add(w.id)
+    }
+  }
+
+  const skuIds = Object.keys(wsMap)
+  if (!skuIds.length) return []
+
+  const { data: skuRows, error } = await supabase.from('npd2_catalog_skus')
+    .select(SUPPLIER_SKU_SELECT)
+    .in('id', skuIds)
+    .eq('is_archived', false)
+    .is('delete_meta', null)
+  if (error) throw error
+
+  const mapped = mapSkuRows(skuRows || [])
+  const merchNameMap = await fetchMemberNameMap(mapped.map(s => s.created_by_member_id))
+  return mapped
+    .map(s => ({
+      ...s,
+      workspace_id:       wsMap[s.id]?.id              || null,
+      workspace_status:   wsMap[s.id]?.status           || null,
+      supplier_org_id:    wsMap[s.id]?.supplier_org_id  || s.supplier_org_id,
+      buyer_ref:          wsMap[s.id]?.buyer_ref        || null,
+      buyer_brief:        wsMap[s.id]?.buyer_brief      || null,
+      supplier_invited:   wsMap[s.id] ? invitedWsIds.has(wsMap[s.id].id) : false,
+      created_by_member_name: merchNameMap[s.created_by_member_id] || null,
+    }))
+    .filter(s => s.supplier_invited)
+}
+
 export const CAT_DEFS = [
   { val: 'all',          label: 'All Products'  },
   { val: 'Accessories',  label: 'Accessories'   },
@@ -645,55 +718,8 @@ export const usePlmStore = create(
               }))
             }
           } else {
-            // supplier: show all their org's uploaded SKUs, overlay any workspace for that org
-            const supplierOrgId = useProfileStore.getState().orgMembership?.orgId
-            const [{ data: skuData, error: skuErr }, { data: wsData }] = await Promise.all([
-              supabase.from('npd2_catalog_skus')
-                .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
-                .eq('npd2_catalog_uploads.supplier_org_id', supplierOrgId)
-                .eq('is_archived', false)
-                .is('delete_meta', null)
-                .order('created_at', { ascending: false }),
-              supabase.from('npd2_workspaces')
-                .select('catalog_sku_id, id, status, supplier_org_id, supplier_member_id, buyer_ref, buyer_brief, origin, reference_media')
-                .eq('supplier_org_id', supplierOrgId),
-            ])
-
-            if (skuErr) throw skuErr
-
-            const wsMap = {}
-            for (const w of (wsData || []))
-              if (!wsMap[w.catalog_sku_id]) wsMap[w.catalog_sku_id] = w
-
-            // Check which workspaces have an active supplier invite (pending or accepted)
-            const wsIds = Object.values(wsMap).map(w => w.id).filter(Boolean)
-            const invitedWsIds = new Set()
-            if (wsIds.length) {
-              const { data: invRows } = await supabase
-                .from('npd2_invites')
-                .select('workspace_id')
-                .in('workspace_id', wsIds)
-                .in('role', ['supplier', 'vendor'])
-                .in('status', ['pending', 'accepted'])
-              for (const i of (invRows || [])) invitedWsIds.add(i.workspace_id)
-              // also treat already-accepted members as invited
-              for (const w of Object.values(wsMap))
-                if (w.supplier_member_id) invitedWsIds.add(w.id)
-            }
-
-            const mappedSupplierSkus = mapSkuRows(skuData || [])
-            const merchNameMap = await fetchMemberNameMap(mappedSupplierSkus.map(s => s.created_by_member_id))
-
-            skus = mappedSupplierSkus.map(s => ({
-              ...s,
-              workspace_id:       wsMap[s.id]?.id              || null,
-              workspace_status:   wsMap[s.id]?.status           || null,
-              supplier_org_id:    wsMap[s.id]?.supplier_org_id  || s.supplier_org_id,
-              buyer_ref:          wsMap[s.id]?.buyer_ref        || null,
-              buyer_brief:        wsMap[s.id]?.buyer_brief      || null,
-              supplier_invited:   wsMap[s.id] ? invitedWsIds.has(wsMap[s.id].id) : false,
-              created_by_member_name: merchNameMap[s.created_by_member_id] || null,
-            }))
+            // supplier: org catalog + workspaces they are assigned to or invited on
+            skus = await fetchSupplierCatalogSkus(memberId)
           }
 
           set({ skus, loading: false }, false, 'plm/fetchDone')
@@ -776,48 +802,7 @@ export const usePlmStore = create(
         if (!memberId) return
         try {
           if (role === 'supplier') {
-            const supplierOrgId = useProfileStore.getState().orgMembership?.orgId
-            const [{ data: skuData }, { data: wsData }] = await Promise.all([
-              supabase.from('npd2_catalog_skus')
-                .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
-                .eq('npd2_catalog_uploads.supplier_org_id', supplierOrgId)
-                .eq('is_archived', false)
-                .is('delete_meta', null)
-                .order('created_at', { ascending: false }),
-              supabase.from('npd2_workspaces')
-                .select('catalog_sku_id, id, status, supplier_org_id, supplier_member_id, buyer_ref, buyer_brief, origin, reference_media')
-                .eq('supplier_org_id', supplierOrgId),
-            ])
-            const wsMap = {}
-            for (const w of (wsData || []))
-              if (!wsMap[w.catalog_sku_id]) wsMap[w.catalog_sku_id] = w
-            const wsIds = Object.values(wsMap).map(w => w.id).filter(Boolean)
-            const invitedWsIds = new Set()
-            if (wsIds.length) {
-              const { data: invRows } = await supabase
-                .from('npd2_invites')
-                .select('workspace_id')
-                .in('workspace_id', wsIds)
-                .in('role', ['supplier', 'vendor'])
-                .in('status', ['pending', 'accepted'])
-              for (const i of (invRows || [])) invitedWsIds.add(i.workspace_id)
-              for (const w of Object.values(wsMap))
-                if (w.supplier_member_id) invitedWsIds.add(w.id)
-            }
-            const mappedRefreshSkus = mapSkuRows(skuData || [])
-            const refreshMerchNameMap = await fetchMemberNameMap(mappedRefreshSkus.map(s => s.created_by_member_id))
-            set({
-              skus: mappedRefreshSkus.map(s => ({
-                ...s,
-                workspace_id:     wsMap[s.id]?.id              || null,
-                workspace_status: wsMap[s.id]?.status           || null,
-                supplier_org_id:  wsMap[s.id]?.supplier_org_id  || s.supplier_org_id,
-                buyer_ref:        wsMap[s.id]?.buyer_ref        || null,
-                buyer_brief:      wsMap[s.id]?.buyer_brief      || null,
-                supplier_invited: wsMap[s.id] ? invitedWsIds.has(wsMap[s.id].id) : false,
-                created_by_member_name: refreshMerchNameMap[s.created_by_member_id] || null,
-              })),
-            }, false, 'plm/refresh')
+            set({ skus: await fetchSupplierCatalogSkus(memberId) }, false, 'plm/refresh')
           } else {
             const SKU_SELECT = '*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )'
             const [
