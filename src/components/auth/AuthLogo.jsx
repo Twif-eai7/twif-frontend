@@ -18,7 +18,7 @@ export default function AuthLogo({ suffix, label }) {
         className="text-stone-900 text-xl"
         style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
       >
-        {label || `Twif Portal${suffix ? ` - ${suffix}` : ''}`}
+        {label || `eai7 Portal${suffix ? ` - ${suffix}` : ''}`}
       </span>
     </button>
   )

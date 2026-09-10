@@ -79,7 +79,7 @@ export function AdminShell({ children }) {
               className="text-stone-900 text-base"
               style={{ fontFamily: "serif" }}
             >
-              Twif Portal
+              eai7 Portal
             </div>
             <div className="text-[10px] font-medium text-stone-400 uppercase tracking-widest mt-0.5">
               Admin

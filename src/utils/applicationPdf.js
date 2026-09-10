@@ -94,7 +94,7 @@ export function downloadApplicationPdf(data) {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
   doc.setTextColor(BRAND[0], BRAND[1], BRAND[2])
-  doc.text('Twif Portal - Vendor Application', M, y)
+  doc.text('eai7 Portal - Vendor Application', M, y)
   y += 7
 
   doc.setFont('helvetica', 'normal')

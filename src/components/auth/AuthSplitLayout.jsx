@@ -3,12 +3,12 @@ import { LogoMark } from '../ui'
 const PANEL_COPY = {
   login: {
     label: 'TECHNOLOGY',
-    title: 'Welcome to Twif Portal',
+    title: 'Welcome to eai7 Portal',
     body: 'Sign in to access the complete platform—sourcing intelligence, supply chain visibility, and your operations workspace.',
   },
   signup: {
     label: 'TECHNOLOGY',
-    title: 'Request access to Twif Portal',
+    title: 'Request access to eai7 Portal',
     body: 'Create your workspace account to collaborate on product development, orders, and supply chain operations.',
   },
   otp: {
@@ -18,7 +18,7 @@ const PANEL_COPY = {
   },
 }
 
-function TwifMark() {
+function BrandMark() {
   return (
     <div className="flex items-center gap-2.5">
       <LogoMark size={36} />
@@ -26,7 +26,7 @@ function TwifMark() {
         className="text-[17px] font-semibold tracking-tight text-[#1e293b]"
         style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
       >
-        Twif
+        eai7
       </span>
     </div>
   )
@@ -53,7 +53,7 @@ export default function AuthSplitLayout({ mode = 'login', children }) {
           />
 
           <div className="relative z-10">
-            <TwifMark />
+            <BrandMark />
             <p className="mt-8 text-[11px] font-semibold tracking-[0.22em] text-[#2bb8a8] uppercase">
               {copy.label}
             </p>
@@ -65,13 +65,13 @@ export default function AuthSplitLayout({ mode = 'login', children }) {
             </p>
           </div>
 
-          <p className="relative z-10 text-xs text-[#94a3b8]">© {new Date().getFullYear()} Twif</p>
+          <p className="relative z-10 text-xs text-[#94a3b8]">© {new Date().getFullYear()} eai7</p>
         </aside>
 
         {/* Right panel */}
         <main className="flex-1 flex flex-col justify-center px-8 py-10 sm:px-12 sm:py-12">
           <div className="md:hidden mb-8">
-            <TwifMark />
+            <BrandMark />
           </div>
 
           {children}
