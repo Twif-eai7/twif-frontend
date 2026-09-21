@@ -165,11 +165,22 @@ function OrgRow({ org, onApprove, onReject, onOpenPreview, onOpenSign, acting })
         <tr className="border-b border-stone-100 bg-stone-50">
           <td colSpan={6} className="py-4 px-4">
             <div className="grid grid-cols-3 gap-x-6 gap-y-3 text-xs">
-              <DetailField label="GST No." value={supplier?.gst_number} />
-              <DetailField label="CIN No." value={supplier?.cin_no} />
-              <DetailField label="Udyam No." value={supplier?.udyam_no} />
-              <DetailField label="MSME No." value={supplier?.msme_no} />
-              <DetailField label="ISI code" value={supplier?.isi_code} />
+              {org.country === 'Sri Lanka' ? (
+                <>
+                  <DetailField label="TIN No." value={supplier?.gst_number} />
+                  <DetailField label="VAT No." value={supplier?.cin_no} />
+                  <DetailField label="Company Registration No." value={supplier?.udyam_no} />
+                </>
+              ) : (
+                <>
+                  <DetailField label="GST No." value={supplier?.gst_number} />
+                  <DetailField label="CIN No." value={supplier?.cin_no} />
+                  <DetailField label="Udyam No." value={supplier?.udyam_no} />
+                  <DetailField label="MSME No." value={supplier?.msme_no} />
+                  <DetailField label="ISI code" value={supplier?.isi_code} />
+                  <DetailField label="IEC code" value={supplier?.iec_code} />
+                </>
+              )}
               <DetailField label="Business type" value={supplier?.supplier_type} />
               <DetailField label="Bank account number" value={supplier?.bank_account_number} />
               <DetailField label="IFSC code" value={supplier?.bank_ifsc_code} />

@@ -12,15 +12,13 @@ import { usePortalUser } from '../../hooks/usePortalUser'
 import { isOrgLive, useProfileStore } from '../../stores/profileStore'
 import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
-import { formatErrorFor, GSTIN_RE, INDIA_PIN_RE } from '../../utils/fieldFormats'
+import { formatErrorFor, GSTIN_RE } from '../../utils/fieldFormats'
 import ApplicationPreviewModal from './ApplicationPreviewModal'
 import { sendAuthOtp, verifyEmailOtp } from '../../lib/authOtp'
 
 // ─── Constants ────────────────────────────────────────────────
-const COUNTRIES = [
-  'United States', 'United Kingdom', 'India', 'Germany', 'France',
-  'Australia', 'Canada', 'Japan', 'China', 'Brazil', 'Mexico', 'Other',
-]
+const COUNTRIES = ['India', 'Sri Lanka']
+const isSriLanka = (country) => country === 'Sri Lanka'
 
 const EMPLOYEE_RANGES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+']
 
@@ -463,11 +461,15 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
     ? !!(form.fullName.trim() && form.phone.trim() && form.country && form.titleRole.trim() && form.employees && (!publicEntry || isValidEmail(form.orgEmail)))
     : !!(form.fullName.trim() && form.country && form.businessName.trim() && form.employees)
 
+  const sriLanka = isSriLanka(form.country)
   const businessComplete = !!(
     form.registration.trim() && form.bankAccountNumber.trim() && form.bankIfsc.trim() &&
     form.pincode.trim() && form.address.trim() && form.ownerName.trim() && selectedCats.length > 0 &&
     (!selectedCats.includes(OTHER_CAT_ID) || form.categoryOther.trim()) &&
-    (isVendorEntrance ? (form.businessName.trim() && form.iec.trim()) : form.isi.trim())
+    (isVendorEntrance ? form.businessName.trim() : true) &&
+    (sriLanka
+      ? (form.cin.trim() && form.udyam.trim())
+      : (isVendorEntrance ? form.iec.trim() : form.isi.trim()))
   )
 
   const agreementComplete = !!(
@@ -555,19 +557,22 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
 
   // Pincode → address lookup via India Post's public PIN code API, so the
   // user gets a starting address they can still edit/extend with street detail.
+  // Sri Lanka uses 5-digit postal codes — skip the India Post lookup.
   async function handlePincodeChange(value) {
-    const digits = value.replace(/\D/g, '').slice(0, 6)
+    const maxLen = isSriLanka(form.country) ? 5 : 6
+    const digits = value.replace(/\D/g, '').slice(0, maxLen)
     setField('pincode', digits)
     setFieldErrors(prev => (prev.pincode
-      ? { ...prev, pincode: INDIA_PIN_RE.test(digits) ? '' : prev.pincode } : prev))
-    if (digits.length !== 6) return
-    try {
-      const res = await fetch(`https://api.postalpincode.in/pincode/${digits}`)
-      const data = await res.json()
-      const po = data?.[0]?.PostOffice?.[0]
-      if (po) setField('address', `${po.District}, ${po.State}, ${po.Country || 'India'} - ${digits}`)
-    } catch {
-      // Lookup failed — user can still type the address manually.
+      ? { ...prev, pincode: formatErrorFor('pincode', digits, validationCtx) } : prev))
+    if (!isSriLanka(form.country) && digits.length === 6) {
+      try {
+        const res = await fetch(`https://api.postalpincode.in/pincode/${digits}`)
+        const data = await res.json()
+        const po = data?.[0]?.PostOffice?.[0]
+        if (po) setField('address', `${po.District}, ${po.State}, ${po.Country || 'India'} - ${digits}`)
+      } catch {
+        // Lookup failed — user can still type the address manually.
+      }
     }
   }
 
@@ -592,7 +597,29 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
           wrapperClassName="mb-0" />
       </div>
 
-      <Select label="Country" required value={form.country} onChange={e => setField('country', e.target.value)}>
+      <Select
+        label="Country"
+        required
+        value={form.country}
+        onChange={e => {
+          const next = e.target.value
+          setField('country', next)
+          // Clear country-specific KYC values when switching.
+          setField('registration', '')
+          setField('cin', '')
+          setField('udyam', '')
+          setField('msme', '')
+          setField('iec', '')
+          setField('isi', '')
+          setGstLookup('')
+          setGstFilled([])
+          setGstState('')
+          setFieldErrors(prev => ({
+            ...prev,
+            registration: '', cin: '', udyam: '', iec: '', pincode: '',
+          }))
+        }}
+      >
         <option value="">Select country</option>
         {COUNTRIES.map(c => <option key={c}>{c}</option>)}
       </Select>
@@ -675,80 +702,123 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
 
         {kycOpen && (
           <div className="p-4">
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="GST / Tax No." required type="text"
-                placeholder="GST number"
-                value={form.registration}
-                onChange={e => handleGstChange(e.target.value)}
-                onBlur={e => handleBlur('registration', e.target.value)}
-                error={fieldErrors.registration}
-                wrapperClassName="mb-0"
-                maxLength={15}
-                hint={
-                  gstLookup === 'loading' ? 'Fetching details from GSTIN…'
-                    : gstLookup === 'ok'
-                      ? (gstFilled.length ? `Filled from GSTIN: ${gstFilled.join(', ')}` : 'GSTIN verified')
-                      : gstLookup === 'partial'
-                        ? `Set Country = India${gstState ? `, State = ${gstState}` : ''}. Add pincode to fill the address.`
-                        : undefined
-                }
-              />
-              <Input
-                label="Registration / CIN No." type="text"
-                placeholder="Corporate identification number"
-                value={form.cin}
-                onChange={e => setFieldChecked('cin', e.target.value)}
-                onBlur={e => handleBlur('cin', e.target.value)}
-                error={fieldErrors.cin}
-                wrapperClassName="mb-0"
-              />
-            </div>
-
-            {isVendorEntrance ? (
-              <Input
-                label="Udyam / MSME No." type="text" className="mt-4"
-                placeholder="Udyam registration number"
-                value={form.udyam}
-                onChange={e => setFieldChecked('udyam', e.target.value)}
-                onBlur={e => handleBlur('udyam', e.target.value)}
-                error={fieldErrors.udyam}
-              />
+            {sriLanka ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="TIN No." required type="text"
+                    placeholder="Tax Identification Number"
+                    value={form.registration}
+                    onChange={e => setFieldChecked('registration', e.target.value)}
+                    onBlur={e => handleBlur('registration', e.target.value)}
+                    error={fieldErrors.registration}
+                    wrapperClassName="mb-0"
+                  />
+                  <Input
+                    label="VAT No." required type="text"
+                    placeholder="VAT registration number"
+                    value={form.cin}
+                    onChange={e => setFieldChecked('cin', e.target.value)}
+                    onBlur={e => handleBlur('cin', e.target.value)}
+                    error={fieldErrors.cin}
+                    wrapperClassName="mb-0"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <Input
+                    label="Company Registration No." required type="text"
+                    placeholder="Company registration number"
+                    value={form.udyam}
+                    onChange={e => setFieldChecked('udyam', e.target.value)}
+                    onBlur={e => handleBlur('udyam', e.target.value)}
+                    error={fieldErrors.udyam}
+                    wrapperClassName="mb-0"
+                  />
+                  <Input
+                    label="Vendor logo" type="url"
+                    placeholder="https://..."
+                    value={form.logoUrl} onChange={e => setField('logoUrl', e.target.value)} wrapperClassName="mb-0"
+                  />
+                </div>
+              </>
             ) : (
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <Input
-                  label="Udyam No." type="text"
-                  placeholder="Udyam registration number"
-                  value={form.udyam}
-                  onChange={e => setFieldChecked('udyam', e.target.value)}
-                  onBlur={e => handleBlur('udyam', e.target.value)}
-                  error={fieldErrors.udyam}
-                  wrapperClassName="mb-0"
-                />
-                <Input
-                  label="MSME No." type="text"
-                  placeholder="MSME registration number"
-                  value={form.msme} onChange={e => setField('msme', e.target.value)} wrapperClassName="mb-0"
-                />
-              </div>
-            )}
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="GST / Tax No." required type="text"
+                    placeholder="GST number"
+                    value={form.registration}
+                    onChange={e => handleGstChange(e.target.value)}
+                    onBlur={e => handleBlur('registration', e.target.value)}
+                    error={fieldErrors.registration}
+                    wrapperClassName="mb-0"
+                    maxLength={15}
+                    hint={
+                      gstLookup === 'loading' ? 'Fetching details from GSTIN…'
+                        : gstLookup === 'ok'
+                          ? (gstFilled.length ? `Filled from GSTIN: ${gstFilled.join(', ')}` : 'GSTIN verified')
+                          : gstLookup === 'partial'
+                            ? `Set Country = India${gstState ? `, State = ${gstState}` : ''}. Add pincode to fill the address.`
+                            : undefined
+                    }
+                  />
+                  <Input
+                    label="Registration / CIN No." type="text"
+                    placeholder="Corporate identification number"
+                    value={form.cin}
+                    onChange={e => setFieldChecked('cin', e.target.value)}
+                    onBlur={e => handleBlur('cin', e.target.value)}
+                    error={fieldErrors.cin}
+                    wrapperClassName="mb-0"
+                  />
+                </div>
 
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <Input
-                label={isVendorEntrance ? 'IEC Code' : 'ISI code'} required type="text"
-                placeholder={isVendorEntrance ? 'IEC Code' : 'ISI code'}
-                value={isVendorEntrance ? form.iec : form.isi}
-                onChange={e => setFieldChecked(isVendorEntrance ? 'iec' : 'isi', e.target.value)}
-                onBlur={isVendorEntrance ? (e => handleBlur('iec', e.target.value)) : undefined}
-                error={isVendorEntrance ? fieldErrors.iec : undefined}
-                wrapperClassName="mb-0"
-              />
-              <Input
-                label="Vendor logo" type="url"
-                placeholder="https://..."
-                value={form.logoUrl} onChange={e => setField('logoUrl', e.target.value)} wrapperClassName="mb-0"
-              />
-            </div>
+                {isVendorEntrance ? (
+                  <Input
+                    label="Udyam / MSME No." type="text" className="mt-4"
+                    placeholder="Udyam registration number"
+                    value={form.udyam}
+                    onChange={e => setFieldChecked('udyam', e.target.value)}
+                    onBlur={e => handleBlur('udyam', e.target.value)}
+                    error={fieldErrors.udyam}
+                  />
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <Input
+                      label="Udyam No." type="text"
+                      placeholder="Udyam registration number"
+                      value={form.udyam}
+                      onChange={e => setFieldChecked('udyam', e.target.value)}
+                      onBlur={e => handleBlur('udyam', e.target.value)}
+                      error={fieldErrors.udyam}
+                      wrapperClassName="mb-0"
+                    />
+                    <Input
+                      label="MSME No." type="text"
+                      placeholder="MSME registration number"
+                      value={form.msme} onChange={e => setField('msme', e.target.value)} wrapperClassName="mb-0"
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <Input
+                    label={isVendorEntrance ? 'IEC Code' : 'ISI code'} required type="text"
+                    placeholder={isVendorEntrance ? 'IEC Code' : 'ISI code'}
+                    value={isVendorEntrance ? form.iec : form.isi}
+                    onChange={e => setFieldChecked(isVendorEntrance ? 'iec' : 'isi', e.target.value)}
+                    onBlur={isVendorEntrance ? (e => handleBlur('iec', e.target.value)) : undefined}
+                    error={isVendorEntrance ? fieldErrors.iec : undefined}
+                    wrapperClassName="mb-0"
+                  />
+                  <Input
+                    label="Vendor logo" type="url"
+                    placeholder="https://..."
+                    value={form.logoUrl} onChange={e => setField('logoUrl', e.target.value)} wrapperClassName="mb-0"
+                  />
+                </div>
+              </>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mt-4">
               <Input
@@ -776,7 +846,9 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
 
       <Input
         label="Pincode" required type="text" className="mt-4"
-        placeholder="e.g. 122001" inputMode="numeric" maxLength={6}
+        placeholder={sriLanka ? 'e.g. 00100' : 'e.g. 122001'}
+        inputMode="numeric"
+        maxLength={sriLanka ? 5 : 6}
         value={form.pincode}
         onChange={e => handlePincodeChange(e.target.value)}
         onBlur={e => handleBlur('pincode', e.target.value)}
@@ -1383,17 +1455,30 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
     if (selectedCats.includes(OTHER_CAT_ID) && !form.categoryOther.trim()) return 'Please specify your other product category'
     if (form.website && !isValidUrl(form.website)) return 'Website must start with https://'
     if (role === 'supplier') {
-      if (!form.registration.trim()) return 'GST No. is required'
       if (isVendorEntrance) {
         if (!form.phone.trim()) return 'Phone is required'
         if (!form.titleRole.trim()) return 'Title / Role is required'
-        if (!form.iec.trim()) return 'IEC No. is required'
-      } else if (!form.isi.trim()) {
-        return 'ISI code is required'
+      }
+      if (isSriLanka(form.country)) {
+        if (!form.registration.trim()) return 'TIN No. is required'
+        if (!form.cin.trim()) return 'VAT No. is required'
+        if (!form.udyam.trim()) return 'Company Registration No. is required'
+      } else {
+        if (!form.registration.trim()) return 'GST No. is required'
+        if (isVendorEntrance) {
+          if (!form.iec.trim()) return 'IEC No. is required'
+        } else if (!form.isi.trim()) {
+          return 'ISI code is required'
+        }
       }
       if (!form.bankAccountNumber.trim()) return 'Bank account number is required'
       if (!form.bankIfsc.trim()) return 'IFSC code is required'
-      if (form.pincode.trim().length !== 6) return 'A valid 6-digit pincode is required'
+      const pinLen = isSriLanka(form.country) ? 5 : 6
+      if (form.pincode.trim().length !== pinLen) {
+        return isSriLanka(form.country)
+          ? 'A valid 5-digit postal code is required'
+          : 'A valid 6-digit pincode is required'
+      }
       if (!form.address.trim()) return 'Address is required'
       if (!form.ownerName.trim()) return 'Owner / Director name is required'
       if (!NDA_DECLARATIONS.every(d => ndaChecks[d.key])) return 'Please accept all NDA declarations to continue'
@@ -1470,9 +1555,14 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
           ...(role === 'supplier' && {
             cin_no: form.cin,
             udyam_no: form.udyam,
+            ...(isSriLanka(form.country)
+              ? {}
+              : (isVendorEntrance
+                ? { iec_code: form.iec, msme_no: undefined }
+                : { msme_no: form.msme, isi_code: form.isi })),
             ...(isVendorEntrance
-              ? { iec_code: form.iec, job_title: form.titleRole, via_vendor_entrance: true }
-              : { msme_no: form.msme, isi_code: form.isi }),
+              ? { job_title: form.titleRole, via_vendor_entrance: true }
+              : {}),
             bank_account_number: form.bankAccountNumber,
             bank_ifsc_code: form.bankIfsc,
             pincode: form.pincode,

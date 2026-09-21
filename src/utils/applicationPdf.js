@@ -41,7 +41,14 @@ export function buildApplicationSections({ form, categoryNames = [], isVendorEnt
     },
     ...(isSupplier ? [{
       title: 'KYC Docs',
-      rows: [
+      rows: form.country === 'Sri Lanka' ? [
+        ['TIN No.', form.registration],
+        ['VAT No.', form.cin],
+        ['Company Registration No.', form.udyam],
+        ['Swift/Bank account number', form.bankAccountNumber],
+        ['SWIFT/BIC/IFSC Code', form.bankIfsc],
+        ['Vendor logo', form.logoUrl],
+      ] : [
         ['GST / Tax No.', form.registration],
         ['Registration / CIN No.', form.cin],
         ['Udyam / MSME No.', form.udyam],

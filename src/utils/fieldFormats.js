@@ -18,18 +18,22 @@ export const PHONE_LOOSE_RE = /^\+?[0-9][0-9\s-]{6,18}[0-9]$/
 export const COUNTRY_TO_ISO2 = {
   'United States': 'US', 'Canada': 'CA', 'United Kingdom': 'GB', 'Germany': 'DE',
   'France': 'FR', 'Australia': 'AU', 'Japan': 'JP', 'India': 'IN', 'China': 'CN',
-  'Brazil': 'BR', 'Mexico': 'MX', 'Other': 'US',
+  'Brazil': 'BR', 'Mexico': 'MX', 'Sri Lanka': 'LK', 'Other': 'US',
 }
 
 // Short advisory messages (no em dashes).
 export const FORMAT_MESSAGES = {
   registration: "This doesn't look like a valid GST number",
+  tin: "Enter a valid TIN number",
   cin: "This doesn't look like a valid CIN",
+  vat: 'Enter a valid VAT number',
   udyam: "This doesn't look like a valid Udyam number",
+  companyReg: 'Enter a valid company registration number',
   iec: 'IEC codes are 10 characters',
   bankIfsc: "This doesn't look like a valid IFSC or SWIFT code",
   bankAccountNumber: 'Account numbers are 9 to 18 digits',
   pincode: 'Enter a valid 6-digit pincode',
+  postalCode: 'Enter a valid 5-digit postal code',
   phone: "This doesn't look like a valid phone number",
   website: 'Website must start with https://',
   ownerEmail: "This doesn't look like a valid email address",
@@ -59,14 +63,23 @@ function phoneError(value, country) {
 export function formatErrorFor(name, value, ctx = {}) {
   const v = (value ?? '').trim()
   if (!v) return ''
+  const sriLanka = ctx.country === 'Sri Lanka'
   switch (name) {
-    case 'registration': return GSTIN_RE.test(v.toUpperCase()) ? '' : FORMAT_MESSAGES.registration
-    case 'cin': return CIN_RE.test(v) ? '' : FORMAT_MESSAGES.cin
-    case 'udyam': return UDYAM_RE.test(v) ? '' : FORMAT_MESSAGES.udyam
+    case 'registration':
+      if (sriLanka) return v.length >= 5 ? '' : FORMAT_MESSAGES.tin
+      return GSTIN_RE.test(v.toUpperCase()) ? '' : FORMAT_MESSAGES.registration
+    case 'cin':
+      if (sriLanka) return v.length >= 3 ? '' : FORMAT_MESSAGES.vat
+      return CIN_RE.test(v) ? '' : FORMAT_MESSAGES.cin
+    case 'udyam':
+      if (sriLanka) return v.length >= 3 ? '' : FORMAT_MESSAGES.companyReg
+      return UDYAM_RE.test(v) ? '' : FORMAT_MESSAGES.udyam
     case 'iec': return IEC_RE.test(v) ? '' : FORMAT_MESSAGES.iec
     case 'bankIfsc': return (IFSC_RE.test(v) || SWIFT_RE.test(v)) ? '' : FORMAT_MESSAGES.bankIfsc
     case 'bankAccountNumber': return BANK_ACCT_RE.test(v) ? '' : FORMAT_MESSAGES.bankAccountNumber
-    case 'pincode': return INDIA_PIN_RE.test(v) ? '' : FORMAT_MESSAGES.pincode
+    case 'pincode':
+      if (sriLanka) return /^\d{5}$/.test(v) ? '' : FORMAT_MESSAGES.postalCode
+      return INDIA_PIN_RE.test(v) ? '' : FORMAT_MESSAGES.pincode
     case 'phone':
     case 'ownerPhone': return phoneError(v, ctx.country)
     case 'website': return isValidUrl(v) ? '' : FORMAT_MESSAGES.website
