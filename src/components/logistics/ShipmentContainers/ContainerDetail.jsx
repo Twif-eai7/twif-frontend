@@ -6,6 +6,8 @@ import ConfirmModal from '../../ui/ConfirmModal'
 const compactInput = 'w-full px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-900 bg-white focus:outline-none focus:border-gray-900 transition-colors placeholder:text-gray-400'
 const compactLabel = 'block text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-0.5'
 
+const PORT_OF_LOADING_OPTIONS = ['Mundra', 'Nahva Sheva', 'Pipavav', 'New Delhi', 'Tuticorin', 'Chennai']
+
 export default function ContainerDetail({
   container, onClose, canManage,
   onShipmentRecorded, onContainerUpdated, onContainerDeleted,
@@ -30,8 +32,21 @@ export default function ContainerDetail({
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting]               = useState(false)
 
+  // ── Invoice search (only shown once a container has enough invoices to
+  //    make scanning them by eye impractical) ──────────────────────────────
+  const [invoiceSearch, setInvoiceSearch] = useState('')
+  useEffect(() => { setInvoiceSearch('') }, [container?.id])
+
   // Gate: can only delete container if no invoice has recorded shipment legs
   const invoices = container?.invoices ?? []
+  const invoiceQuery = invoiceSearch.trim().toLowerCase()
+  const filteredInvoices = invoiceQuery
+    ? invoices.filter(inv =>
+        (inv.invoice_number || '').toLowerCase().includes(invoiceQuery) ||
+        (inv.primary_vendor_name || '').toLowerCase().includes(invoiceQuery) ||
+        (inv.bl_number || '').toLowerCase().includes(invoiceQuery)
+      )
+    : invoices
   const containerHasLegs = invoices.some(inv =>
     Object.values(inv.legsByLineItem ?? {}).some(q => q > 0)
   )
@@ -110,7 +125,7 @@ export default function ContainerDetail({
 
   if (!container) {
     return (
-      <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-3 text-center bg-gray-50">
+      <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-3 text-center bg-[#E8E9EE]">
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.5">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
           <polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" />
@@ -123,29 +138,42 @@ export default function ContainerDetail({
 
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-50 w-full">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#FAFDFF] w-full">
+      {/* Hidden SVG filter — feTurbulence + feDisplacementMap refracts
+          whatever sits behind the glass bar below, so the blur actually
+          warps instead of just tinting flat color. Chrome/Edge only;
+          Safari/Firefox fall back to plain blur. */}
+      <svg aria-hidden style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>
+        <defs>
+          <filter id="invoices-glass-distort" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.012 0.08" numOctaves="2" seed="7" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="18" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+        </defs>
+      </svg>
+
       {/* Pinned header */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-4 py-3">
+      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-4 py-2">
 
         {/* Title row */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-2 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <button type="button" onClick={onClose}
-              className="md:hidden flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 mt-0.5">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              className="md:hidden flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <polyline points="15 18 9 12 15 6" />
               </svg>
             </button>
             <div className="min-w-0">
               <div className="text-sm font-bold text-gray-900 truncate">Container: {container.container_number || '—'}</div>
-              <div className="text-xs text-gray-500 mt-0.5 truncate">Vessel: {container.flight_vessel || '—'}</div>
+              <div className="text-xs text-gray-500 truncate">Vessel: {container.flight_vessel || '—'}</div>
             </div>
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">
             {!isEditing && (
               <button type="button" onClick={() => setMetaOpen(o => !o)}
-                className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+                className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
                 title={metaOpen ? 'Hide details' : 'Show details'}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                   className={`transition-transform ${metaOpen ? 'rotate-180' : ''}`}>
@@ -155,9 +183,9 @@ export default function ContainerDetail({
             )}
             {canManage && !isEditing && (
               <button type="button" onClick={startEdit}
-                className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-700 transition-colors"
+                className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-700 transition-colors"
                 title={containerComplete ? 'Edit ETA' : 'Edit container'}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </svg>
@@ -165,17 +193,17 @@ export default function ContainerDetail({
             )}
             {canManage && !isEditing && !containerHasLegs && (
               <button type="button" onClick={() => setShowDeleteModal(true)}
-                className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 text-gray-600 hover:text-red-500 transition-colors"
+                className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-red-50 text-gray-600 hover:text-red-500 transition-colors"
                 title="Delete container">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" />
                   <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
                 </svg>
               </button>
             )}
             <button type="button" onClick={onClose}
-              className="hidden md:flex w-7 h-7 items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              className="hidden md:flex w-6 h-6 items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
@@ -261,8 +289,16 @@ export default function ContainerDetail({
                     </div>
                     <div className="col-span-2">
                       <label className={compactLabel}>Port of Loading</label>
-                      <input type="text" value={portOfLoading} onChange={e => setPortOfLoading(e.target.value)}
-                        className={compactInput} placeholder="e.g. Nhava Sheva" />
+                      <select value={portOfLoading} onChange={e => setPortOfLoading(e.target.value)} className={compactInput}>
+                        <option value="">Select</option>
+                        {/* A container saved before this became a fixed list may carry
+                            a value outside it (typo, a port not in the list) — kept as
+                            its own option instead of silently blanking it out on save. */}
+                        {portOfLoading && !PORT_OF_LOADING_OPTIONS.includes(portOfLoading) && (
+                          <option value={portOfLoading}>{portOfLoading} (existing)</option>
+                        )}
+                        {PORT_OF_LOADING_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
                     </div>
                     <div className="col-span-3">
                       <label className={compactLabel}>Booking Date</label>
@@ -304,12 +340,40 @@ export default function ContainerDetail({
       </div>
 
       {/* Invoice list */}
-      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Invoices</span>
+      <div className="flex-1 overflow-y-auto">
+        {/* Invoices sub-header — sticky over the scrolling cards, flush
+            against the header above (the scroll container has no top
+            padding, so no negative-margin bleed is needed to close the
+            gap) — the glass filter has real content passing behind it to
+            refract as the list scrolls. */}
+        <div
+          className="sticky top-0 z-10 px-5 pt-2 pb-2 bg-white/25 border-b border-white/50 rounded-b-xl flex items-center gap-3 justify-between"
+          style={{
+            backdropFilter: 'url(#invoices-glass-distort) blur(6px) saturate(150%)',
+            WebkitBackdropFilter: 'blur(6px) saturate(150%)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.06), inset 0 1.5px 0 rgba(255,255,255,0.65)',
+          }}
+        >
+          <span className="text-xs font-bold text-black uppercase tracking-wide flex-shrink-0">Invoices</span>
+          {invoices.length >= 2 && (
+            <div className="relative flex-1 max-w-full">
+              <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                value={invoiceSearch}
+                onChange={e => setInvoiceSearch(e.target.value)}
+                placeholder="Search invoices…"
+                className="w-full pl-6.5 pr-2 py-1 text-xs text-gray-900 bg-black/5 rounded-b-lg focus:outline-none focus:bg-black/10 transition-colors placeholder:text-gray-500"
+                style={{ backdropFilter: 'url(#invoices-glass-distort) blur(4px) saturate(130%)', WebkitBackdropFilter: 'blur(4px) saturate(130%)' }}
+              />
+            </div>
+          )}
           {canManage && (
             <button type="button" onClick={onAddInvoice}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-700 hover:text-gray-900 transition-colors">
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-black hover:text-gray-900 transition-colors flex-shrink-0">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
               </svg>
@@ -318,22 +382,26 @@ export default function ContainerDetail({
           )}
         </div>
 
-        {invoices.length === 0 ? (
-          <p className="text-xs text-gray-400 py-6 text-center">No invoices added to this container yet</p>
-        ) : (
-          invoices.map(invoice => (
-            <InvoiceCard
-              key={invoice.id}
-              invoice={invoice}
-              canManage={canManage}
-              buyerOrgId={container.buyer_org_id}
-              onShipmentRecorded={onShipmentRecorded}
-              onInvoiceUpdated={onContainerUpdated}
-              onInvoiceDeleted={onContainerUpdated}
-              onPoRemoved={onContainerUpdated}
-            />
-          ))
-        )}
+        <div className="px-4 pt-4 pb-6 space-y-4">
+          {invoices.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">No invoices added to this container yet</p>
+          ) : filteredInvoices.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">No invoices match "{invoiceSearch}"</p>
+          ) : (
+            filteredInvoices.map(invoice => (
+              <InvoiceCard
+                key={invoice.id}
+                invoice={invoice}
+                canManage={canManage}
+                buyerOrgId={container.buyer_org_id}
+                onShipmentRecorded={onShipmentRecorded}
+                onInvoiceUpdated={onContainerUpdated}
+                onInvoiceDeleted={onContainerUpdated}
+                onPoRemoved={onContainerUpdated}
+              />
+            ))
+          )}
+        </div>
       </div>
     </div>
   )

@@ -77,21 +77,6 @@ function getFilteredChartData(volumeData, buyer, vendor, monthList, monthLabels)
   }))
 }
 
-// Reconstruct the full month name from a raw Excel column key using the
-// deterministic naming pattern the backend uses in MONTH_LABEL_MAP.
-const _KEY_MONTHS = {
-  jan:'January', feb:'February', mar:'March', apr:'April', may:'May',
-  jun:'June', jul:'July', aug:'August', sep:'September', sept:'September',
-  oct:'October', nov:'November', dec:'December',
-}
-function excelKeyToFullName(key) {
-  const k = String(key).toLowerCase()
-  if (_KEY_MONTHS[k]) return `${_KEY_MONTHS[k]} 2025`
-  const m = k.match(/^for(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(\d{2})$/)
-  if (m && _KEY_MONTHS[m[1]]) return `${_KEY_MONTHS[m[1]]} ${2000 + parseInt(m[2])}`
-  return key
-}
-
 function getFilteredOpenPoChartData(openOrdersData, buyer, buyerSwitcherBuyers, vendor, monthList, monthLabels, fyConfig) {
   if (!openOrdersData?.buyerBreakdown) return {}
 
@@ -126,13 +111,14 @@ function getFilteredOpenPoChartData(openOrdersData, buyer, buyerSwitcherBuyers, 
     return resolveResult(fullNameToValue)
   }
 
-  // Vendor filter — use rows; map fullMonthName → excelKey via the key pattern
+  // Vendor filter — use rows, keyed directly by the raw full month name
+  // (e.g. "April 2025") toOpenData/computeLakshitOpenData store them under —
+  // globally unique, so no fyConfig-dependent short-key translation needed
+  // (a short key like "April" would be ambiguous: FY26 and FY27's own
+  // fiscalMonths arrays both use "April".."December" for their first 9
+  // entries, and this one openOrdersData object gets reused for both the
+  // FY26 and FY27 "By Months" cards side by side).
   if (!openOrdersData?.rows?.length) return {}
-
-  const fullNameToExcelKey = {}
-  ;(openOrdersData.months || []).forEach((key) => {
-    fullNameToExcelKey[excelKeyToFullName(key)] = key
-  })
 
   let rows = openOrdersData.rows.filter((r) => !r.isTotalRow)
   if (!isAll) {
@@ -150,17 +136,38 @@ function getFilteredOpenPoChartData(openOrdersData, buyer, buyerSwitcherBuyers, 
     const fiscalIdx     = fiscalMonths.indexOf(m)
     const fullMonthName = fiscalIdx >= 0 ? openPoFiscal[fiscalIdx] : ''
     if (!fullMonthName) return
-    const excelKey = fullNameToExcelKey[fullMonthName]
-    if (excelKey) {
-      fullNameToValue[fullMonthName] = rows.reduce((s, r) => s + (parseFloat(r[excelKey]) || 0), 0)
-    }
+    fullNameToValue[fullMonthName] = rows.reduce((s, r) => s + (parseFloat(r[fullMonthName]) || 0), 0)
   })
   return resolveResult(fullNameToValue)
+}
+
+// dashboard_open_current_month_split (sql/dashboard_rpcs.sql) returns one
+// row per (buyer, vendor) for just the current calendar month, split into
+// overdueValue (target_date already passed) / upcomingValue (still to
+// come) — same buyer/vendor filtering as getFilteredOpenPoChartData above,
+// just against a flat per-buyer-per-vendor list instead of a pre-aggregated
+// per-month breakdown (this data covers one month, not a whole year, so
+// there's no need for the buyerBreakdown fast-path).
+function getFilteredCurrentMonthSplit(splitData, buyer, buyerSwitcherBuyers, vendor) {
+  if (!splitData?.length) return { overdueValue: 0, upcomingValue: 0 }
+  const isAll = !buyer || buyer === 'All' || String(buyer).toUpperCase() === 'TOTAL'
+  const validBuyers = (buyerSwitcherBuyers || []).filter((b) => String(b).toUpperCase() !== 'TOTAL')
+  const buyersToSum = (isAll ? validBuyers : [buyer]).map((b) => String(b).toUpperCase())
+  const nv = vendor && vendor !== 'All' ? String(vendor).toUpperCase().trim() : null
+
+  return splitData.reduce((acc, row) => {
+    if (!buyersToSum.includes(String(row.buyer || '').toUpperCase().trim())) return acc
+    if (nv && String(row.vendor || '').toUpperCase().trim() !== nv) return acc
+    acc.overdueValue  += row.overdueValue  || 0
+    acc.upcomingValue += row.upcomingValue || 0
+    return acc
+  }, { overdueValue: 0, upcomingValue: 0 })
 }
 
 export default function Fy26ByMonthsChart({
   volumeData,
   openOrdersData,
+  currentMonthSplit,
   buyer,
   buyerSwitcherBuyers,
   vendor,
@@ -169,6 +176,7 @@ export default function Fy26ByMonthsChart({
   yMax: yMaxProp,
   fyConfig,
   compact = false,
+  onBarClick,
 }) {
   const [sel, setSel] = useState(null) // { idx, bar: 'shipped'|'open' }
 
@@ -208,6 +216,11 @@ export default function Fy26ByMonthsChart({
 
   const hasOpenData = useMemo(() => Object.values(openByLabel || {}).some((v) => (v || 0) > 0), [openByLabel])
 
+  const currentMonthSplitFiltered = useMemo(
+    () => getFilteredCurrentMonthSplit(currentMonthSplit, buyer, buyerSwitcherBuyers, vendor),
+    [currentMonthSplit, buyer, buyerSwitcherBuyers, vendor]
+  )
+
   useEffect(() => {
     if (!onTotals) return
     const totalShipped = data.reduce((s, d) => s + (d.shippedRaw || 0), 0)
@@ -232,11 +245,12 @@ export default function Fy26ByMonthsChart({
   // Use parent-supplied max (for synchronized scale) if provided and larger
   const effectiveMaxY = yMaxProp != null && yMaxProp > maxY ? yMaxProp : maxY
 
-  const pastMonthLabels = useMemo(() => {
-    if (!fyConfig?.fiscalMonths || !fyConfig?.openPoFiscal) return new Set()
+  const { pastMonthLabels, currentMonthLabel } = useMemo(() => {
+    if (!fyConfig?.fiscalMonths || !fyConfig?.openPoFiscal) return { pastMonthLabels: new Set(), currentMonthLabel: null }
     const now = new Date()
     const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const result = new Set()
+    let curLabel = null
     fyConfig.fiscalMonths.forEach((m, idx) => {
       const full = fyConfig.openPoFiscal[idx]
       if (!full) return
@@ -244,11 +258,14 @@ export default function Fy26ByMonthsChart({
       const mIdx = MONTH_NAMES.indexOf(mon)
       const mYear = parseInt(yr)
       if (!isNaN(mIdx) && !isNaN(mYear)) {
-        const isPast = mYear < now.getFullYear() || (mYear === now.getFullYear() && mIdx <= now.getMonth())
+        // Strictly before the current month — the current month (even on
+        // its first day) isn't "past" yet, just not finished.
+        const isPast = mYear < now.getFullYear() || (mYear === now.getFullYear() && mIdx < now.getMonth())
         if (isPast) result.add(MONTH_LABELS[m] || m.substring(0, 3))
+        else if (mYear === now.getFullYear() && mIdx === now.getMonth()) curLabel = MONTH_LABELS[m] || m.substring(0, 3)
       }
     })
-    return result
+    return { pastMonthLabels: result, currentMonthLabel: curLabel }
   }, [fyConfig, MONTH_LABELS])
 
   const chart = useMemo(() => {
@@ -265,57 +282,132 @@ export default function Fy26ByMonthsChart({
       yTicks.push({ i, v, y, label })
     }
 
-    const sp = data.length ? ca.w / data.length : ca.w
-    const bw = hasOpenData ? Math.max(4, Math.min(10, sp / 2 - 2)) : data.length > 11 ? 14 : 20
+    const n = data.length
+    const baseSp = n ? ca.w / n : ca.w
+    const bw = hasOpenData ? Math.max(4, Math.min(10, baseSp / 2 - 2)) : data.length > 11 ? 14 : 20
     const barGap = hasOpenData ? 2 : 0
     const groupW = hasOpenData ? bw * 2 + barGap : bw
-    const groupOffX = (sp - groupW) / 2
+
+    // The current (in-progress) month's Open slot needs a 3rd bar (overdue +
+    // upcoming, alongside shipped) that every other month doesn't — cramming
+    // that into the same slot width as a normal 2-bar month forced both
+    // halves down to an abnormally thin half-width. Instead, widen just the
+    // current month's own slot to fit a 3rd FULL-width bar, borrowing the
+    // difference evenly from every other month's slot so the total still
+    // sums to ca.w — every bar (current month included) ends up the same
+    // normal width instead of some being squeezed.
+    const currentIdx = data.findIndex((d) => d.label === currentMonthLabel)
+    const currentGroupW = bw * 3 + barGap * 2
+    const extra = (hasOpenData && currentIdx >= 0) ? Math.max(0, currentGroupW - groupW) : 0
+    const shrinkPerOther = n > 1 ? extra / (n - 1) : 0
+
+    const slotWidths = data.map((_, i) => (i === currentIdx ? baseSp + extra : baseSp - shrinkPerOther))
+    const slotX = []
+    let cursor = ca.x
+    slotWidths.forEach((w) => { slotX.push(cursor); cursor += w })
 
     const bars = data.map((d, i) => {
       const shippedH = effectiveMaxY > 0 ? (d.shippedK / effectiveMaxY) * ca.h : 0
       const openK = (openByLabel?.[d.label] || 0) / 1000
       const openH = effectiveMaxY > 0 ? Math.max(openK > 0 ? 3 : 0, (openK / effectiveMaxY) * ca.h) : 0
-      const baseX = ca.x + i * sp + groupOffX
+      const isPast = pastMonthLabels.has(d.label)
+      const isCurrent = d.label === currentMonthLabel
+      const slotW = slotWidths[i]
+      const thisGroupW = (isCurrent && hasOpenData) ? currentGroupW : groupW
+      const baseX = slotX[i] + (slotW - thisGroupW) / 2
       const shippedY = ca.y + ca.h - shippedH
       const openX = baseX + bw + barGap
       const openY = ca.y + ca.h - openH
       const isSelShip = sel && sel.idx === i && sel.bar === 'shipped'
       const isSelOpen = sel && sel.idx === i && sel.bar === 'open'
-      const isPast = pastMonthLabels.has(d.label)
+      // "April 2026" style full name for the drill-through click — the only
+      // form labelToSlug (src/stores/openPoStore.js, used by the parent's
+      // handleOpenInMis/handleShippedInMis) understands.
+      const fiscalIdx = fiscalMonths.indexOf(d.key)
+      const fullMonthName = fiscalIdx >= 0 ? (fyConfig?.openPoFiscal?.[fiscalIdx] || '') : ''
+
+      // The current (in-progress) month is split into an overdue segment
+      // (target_date already passed — colored the same red as a fully past
+      // month, since that balance is delayed too) next to an upcoming
+      // segment (still blue) — instead of the whole month solid-blue just
+      // because the month itself hasn't finished yet. Both render at the
+      // same full bw width every other month's single open bar uses — the
+      // extra slot width reserved above exists specifically for this.
+      let openOverdue = null, openUpcoming = null, open = null
+      const isSelOverdue = sel && sel.idx === i && sel.bar === 'open-overdue'
+      const isSelUpcoming = sel && sel.idx === i && sel.bar === 'open-upcoming'
+      if (isCurrent && hasOpenData) {
+        const overdueK  = (currentMonthSplitFiltered.overdueValue  || 0) / 1000
+        const upcomingK = (currentMonthSplitFiltered.upcomingValue || 0) / 1000
+        const overdueH  = effectiveMaxY > 0 ? Math.max(overdueK  > 0 ? 3 : 0, (overdueK  / effectiveMaxY) * ca.h) : 0
+        const upcomingH = effectiveMaxY > 0 ? Math.max(upcomingK > 0 ? 3 : 0, (upcomingK / effectiveMaxY) * ca.h) : 0
+        const upcomingX = openX + bw + barGap
+        if (overdueH > 0) {
+          openOverdue = { x: openX, y: ca.y + ca.h - overdueH, w: bw, h: overdueH, fill: isSelOverdue ? '#FF6B6B' : '#f04242' }
+        }
+        if (upcomingH > 0) {
+          openUpcoming = { x: upcomingX, y: ca.y + ca.h - upcomingH, w: bw, h: upcomingH, fill: isSelUpcoming ? '#6b6eff' : '#1100ff' }
+        }
+      } else if (hasOpenData && openH > 0) {
+        open = { x: openX, y: openY, w: bw, h: openH,
+          fill: isSelOpen ? (isPast ? '#FF6B6B' : '#6b6eff') : (isPast ? '#f04242' : '#1100ff') }
+      }
 
       return {
         i,
         label: d.label,
+        fullMonthName,
         baseX,
+        slotW,
         shipped: { x: baseX, y: shippedY, w: bw, h: shippedH, fill: isSelShip ? '#00ff40' : '#22c55e' },
-        open: hasOpenData && openH > 0
-          ? { x: openX, y: openY, w: bw, h: openH,
-              fill: isSelOpen ? (isPast? '#FF6B6B' : '#6b6eff') : (isPast ? '#f04242' : '#1100ff') }
-          : null,
-        groupW,
+        open,
+        openOverdue,
+        openUpcoming,
+        groupW: thisGroupW,
         ca,
         shippedRaw: d.shippedRaw,
         openRaw: openByLabel?.[d.label] || 0,
+        overdueRaw: isCurrent ? (currentMonthSplitFiltered.overdueValue || 0) : 0,
+        upcomingRaw: isCurrent ? (currentMonthSplitFiltered.upcomingValue || 0) : 0,
         isPast,
+        isCurrent,
       }
     })
 
-    return { W, H, ca, yTicks, bars, sp, bw, barGap, groupW, groupOffX }
-  }, [data, openByLabel, hasOpenData, effectiveMaxY, sel, pastMonthLabels, compact])
+    return { W, H, ca, yTicks, bars, sp: baseSp, bw, barGap, groupW }
+  }, [data, openByLabel, hasOpenData, effectiveMaxY, sel, pastMonthLabels, currentMonthLabel, currentMonthSplitFiltered, compact, fiscalMonths, fyConfig])
 
   const tooltip = useMemo(() => {
     if (!sel || !data[sel.idx]) return null
     const b = chart.bars.find((x) => x.i === sel.idx)
     if (!b) return null
-    const isOpen = sel.bar === 'open'
-    const bar = isOpen ? b.open : b.shipped
+    const barByKey = { shipped: b.shipped, open: b.open, 'open-overdue': b.openOverdue, 'open-upcoming': b.openUpcoming }
+    const bar = barByKey[sel.bar]
     if (!bar) return null
+    const isShipped = sel.bar === 'shipped'
 
     const cx = bar.x + bar.w / 2
     const y  = bar.y
     const tipLine1 = `${b.label}`
-    const tipLine2 = `↑ ${fmt$(b.shippedRaw)}`
-    const tipLine3 = hasOpenData && (b.openRaw || 0) > 0 ? `● ${fmt$(b.openRaw)}` : null
+    const RED = '#f87171', BLUE = '#60a5fa', GREEN = '#4ade80'
+    let tipLine2, line2Color, tipLine3 = null, line3Color = null
+    if (isShipped) {
+      tipLine2 = `↑ ${fmt$(b.shippedRaw)}`
+      line2Color = GREEN
+      if (hasOpenData && (b.openRaw || 0) > 0) {
+        tipLine3 = `● ${fmt$(b.openRaw)}`
+        line3Color = pastMonthLabels.has(b.label) ? RED : BLUE
+      }
+    } else if (sel.bar === 'open-overdue') {
+      tipLine2 = `Overdue: ${fmt$(b.overdueRaw)}`
+      line2Color = RED
+    } else if (sel.bar === 'open-upcoming') {
+      tipLine2 = `Upcoming: ${fmt$(b.upcomingRaw)}`
+      line2Color = BLUE
+    } else {
+      tipLine2 = `● ${fmt$(b.openRaw)}`
+      line2Color = pastMonthLabels.has(b.label) ? RED : BLUE
+    }
     const tw = 100
     const th = tipLine3 ? 38 : 26
 
@@ -334,25 +426,24 @@ export default function Fy26ByMonthsChart({
       ? `${cx - 5},${ty} ${cx},${ty - 5} ${cx + 5},${ty}`
       : `${cx - 5},${ty + th} ${cx},${ty + th + 5} ${cx + 5},${ty + th}`
 
-    const openIsPast = pastMonthLabels.has(b.label)
-    return { tx, ty, tw, th, pts, tipLine1, tipLine2, tipLine3, showBelow, cx, openIsPast }
+    return { tx, ty, tw, th, pts, tipLine1, tipLine2, line2Color, tipLine3, line3Color, showBelow, cx }
   }, [sel, data, chart, hasOpenData, pastMonthLabels])
 
   const totalShipped = data.reduce((s, d) => s + (d.shippedRaw || 0), 0)
+  // The current month's own value is split (overdue counts toward "past",
+  // upcoming toward "future") instead of the whole month landing in
+  // "future" just because the month itself isn't over — matching what the
+  // split bar now shows.
   const totalOpenPast = data.reduce((s, d) => {
+    if (d.label === currentMonthLabel) return s + (currentMonthSplitFiltered.overdueValue || 0)
     const v = openByLabel?.[d.label] || 0
     return s + (pastMonthLabels.has(d.label) ? v : 0)
   }, 0)
   const totalOpenFuture = data.reduce((s, d) => {
+    if (d.label === currentMonthLabel) return s + (currentMonthSplitFiltered.upcomingValue || 0)
     const v = openByLabel?.[d.label] || 0
     return s + (!pastMonthLabels.has(d.label) ? v : 0)
   }, 0)
-
-  const fmtC = (v) => {
-    if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M'
-    if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'K'
-    return '$' + Math.round(v)
-  }
 
   if (!data.length) {
     return <div style={{ padding: '2em', textAlign: 'center', color: '#555555' }}>No data for selected filter.</div>
@@ -360,26 +451,52 @@ export default function Fy26ByMonthsChart({
 
   return (
     <div className="chart-container">
-      {/* Legend with inline totals */}
+      {/* Legend with inline totals — clickable aggregates (whole-FY, no
+          specific month) into the same drill-through the bars themselves
+          use. fullMonthName: null tells the parent's onBarClick this is a
+          whole-FY click; handleOpenInMis/handleShippedInMis already default
+          to the full FY range whenever no month is passed. The two Open
+          chips also pass subSegment ('overdue'/'upcoming') so their totals
+          (totalOpenPast/totalOpenFuture, split by today across every month
+          — not just the current one) don't both land on the exact same
+          unfiltered whole-FY Open table. */}
       <div className="flex gap-4 items-center mb-1 px-6 flex-wrap">
-        <span className="flex items-center gap-1.5 text-[10px]">
+        <button
+          type="button"
+          onClick={() => onBarClick && onBarClick({ bar: 'shipped', fullMonthName: null })}
+          disabled={!onBarClick}
+          className="flex items-center gap-1.5 text-[10px] bg-transparent border-0 p-0 disabled:cursor-default"
+          style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+        >
           <span className="w-2.5 h-2.5 rounded-[2px] inline-block flex-shrink-0" style={{ background: '#22c55e' }} />
           <span className="text-gray-500">Shipped</span>
-          <span className="font-semibold text-gray-800">{fmtC(totalShipped)}</span>
-        </span>
+          <span className="font-semibold text-gray-800">{fmt$(totalShipped)}</span>
+        </button>
         {hasOpenData && totalOpenPast > 0 && (
-          <span className="flex items-center gap-1.5 text-[10px]">
+          <button
+            type="button"
+            onClick={() => onBarClick && onBarClick({ bar: 'open', fullMonthName: null, subSegment: 'overdue' })}
+            disabled={!onBarClick}
+            className="flex items-center gap-1.5 text-[10px] bg-transparent border-0 p-0 disabled:cursor-default"
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+          >
             <span className="w-2.5 h-2.5 rounded-[2px] inline-block flex-shrink-0 bg-red-400" />
             <span className="text-gray-500">Open (past)</span>
-            <span className="font-semibold text-gray-800">{fmtC(totalOpenPast)}</span>
-          </span>
+            <span className="font-semibold text-gray-800">{fmt$(totalOpenPast)}</span>
+          </button>
         )}
         {hasOpenData && totalOpenFuture > 0 && (
-          <span className="flex items-center gap-1.5 text-[10px]">
+          <button
+            type="button"
+            onClick={() => onBarClick && onBarClick({ bar: 'open', fullMonthName: null, subSegment: 'upcoming' })}
+            disabled={!onBarClick}
+            className="flex items-center gap-1.5 text-[10px] bg-transparent border-0 p-0 disabled:cursor-default"
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+          >
             <span className="w-2.5 h-2.5 rounded-[2px] inline-block flex-shrink-0 bg-blue-400" />
             <span className="text-gray-500">Open (future)</span>
-            <span className="font-semibold text-gray-800">{fmtC(totalOpenFuture)}</span>
-          </span>
+            <span className="font-semibold text-gray-800">{fmt$(totalOpenFuture)}</span>
+          </button>
         )}
       </div>
       <svg viewBox={`0 0 ${chart.W} ${chart.H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block', width: '100%' }}>
@@ -391,7 +508,7 @@ export default function Fy26ByMonthsChart({
                 x={chart.ca.x - 5}
                 y={t.y + 3}
                 textAnchor="end"
-                fill="#9ca3af"
+                fill="#374151"
                 fontSize="8"
               >
                 {t.label}
@@ -426,7 +543,10 @@ export default function Fy26ByMonthsChart({
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setSel({ idx: b.i, bar: 'shipped' })}
                 onMouseLeave={() => setSel(null)}
-                onClick={() => setSel((prev) => (prev && prev.idx === b.i && prev.bar === 'shipped' ? null : { idx: b.i, bar: 'shipped' }))}
+                onClick={() => {
+                  setSel((prev) => (prev && prev.idx === b.i && prev.bar === 'shipped' ? null : { idx: b.i, bar: 'shipped' }))
+                  if (onBarClick && b.fullMonthName) onBarClick({ bar: 'shipped', fullMonthName: b.fullMonthName })
+                }}
               />
               {b.open && (
                 <rect
@@ -439,15 +559,60 @@ export default function Fy26ByMonthsChart({
                   style={{ cursor: 'pointer' }}
                   onMouseEnter={() => setSel({ idx: b.i, bar: 'open' })}
                   onMouseLeave={() => setSel(null)}
-                  onClick={() => setSel((prev) => (prev && prev.idx === b.i && prev.bar === 'open' ? null : { idx: b.i, bar: 'open' }))}
+                  onClick={() => {
+                    setSel((prev) => (prev && prev.idx === b.i && prev.bar === 'open' ? null : { idx: b.i, bar: 'open' }))
+                    if (onBarClick && b.fullMonthName) onBarClick({ bar: 'open', fullMonthName: b.fullMonthName })
+                  }}
+                />
+              )}
+              {b.openOverdue && (
+                <rect
+                  x={b.openOverdue.x}
+                  y={b.openOverdue.y}
+                  width={b.openOverdue.w}
+                  height={b.openOverdue.h}
+                  fill={b.openOverdue.fill}
+                  rx="2"
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setSel({ idx: b.i, bar: 'open-overdue' })}
+                  onMouseLeave={() => setSel(null)}
+                  onClick={() => {
+                    setSel((prev) => (prev && prev.idx === b.i && prev.bar === 'open-overdue' ? null : { idx: b.i, bar: 'open-overdue' }))
+                    if (onBarClick && b.fullMonthName) onBarClick({ bar: 'open', fullMonthName: b.fullMonthName, subSegment: 'overdue' })
+                  }}
+                />
+              )}
+              {b.openUpcoming && (
+                <rect
+                  x={b.openUpcoming.x}
+                  y={b.openUpcoming.y}
+                  width={b.openUpcoming.w}
+                  height={b.openUpcoming.h}
+                  fill={b.openUpcoming.fill}
+                  rx="2"
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setSel({ idx: b.i, bar: 'open-upcoming' })}
+                  onMouseLeave={() => setSel(null)}
+                  onClick={() => {
+                    setSel((prev) => (prev && prev.idx === b.i && prev.bar === 'open-upcoming' ? null : { idx: b.i, bar: 'open-upcoming' }))
+                    if (onBarClick && b.fullMonthName) onBarClick({ bar: 'open', fullMonthName: b.fullMonthName, subSegment: 'upcoming' })
+                  }}
                 />
               )}
 
+              <rect
+                x={b.baseX + b.groupW / 2 - b.slotW * 0.42}
+                y={chart.ca.y + chart.ca.h + 5}
+                width={b.slotW * 0.84}
+                height={13}
+                rx="3"
+                fill="#f3f4f6"
+              />
               <text
                 x={b.baseX + b.groupW / 2}
                 y={chart.ca.y + chart.ca.h + 14}
                 textAnchor="middle"
-                fill="#6b7280"
+                fill="#111827"
                 fontSize={data.length > 11 ? 7 : 8}
                 fontWeight={b.shippedRaw > 0 || b.openRaw > 0 ? '600' : '400'}
               >
@@ -465,11 +630,11 @@ export default function Fy26ByMonthsChart({
             <text x={tooltip.tx + tooltip.tw / 2} y={tooltip.ty + 9} textAnchor="middle" fill="#cbd5e1" fontSize="7" fontWeight="600">
               {tooltip.tipLine1}
             </text>
-            <text x={tooltip.tx + tooltip.tw / 2} y={tooltip.ty + 20} textAnchor="middle" fill="#4ade80" fontSize="7.5">
+            <text x={tooltip.tx + tooltip.tw / 2} y={tooltip.ty + 20} textAnchor="middle" fill={tooltip.line2Color} fontSize="7.5">
               {tooltip.tipLine2}
             </text>
             {tooltip.tipLine3 && (
-              <text x={tooltip.tx + tooltip.tw / 2} y={tooltip.ty + 31} textAnchor="middle" fill={tooltip.openIsPast ? '#f87171' : '#60a5fa'} fontSize="7.5">
+              <text x={tooltip.tx + tooltip.tw / 2} y={tooltip.ty + 31} textAnchor="middle" fill={tooltip.line3Color} fontSize="7.5">
                 {tooltip.tipLine3}
               </text>
             )}

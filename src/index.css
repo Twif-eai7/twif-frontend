@@ -1,7 +1,73 @@
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@500;700&display=swap');
+/* Instrument Serif / DM Sans / Figtree / Dancing Script are loaded via a non-blocking <link>
+   in index.html instead of @import here — CSS @import is always render-blocking regardless of
+   how the stylesheet containing it is loaded, and showed up as such in Lighthouse. */
 @import "tailwindcss";
+
+/* Reserves a fixed glyph box for every Material Symbols icon span, sized to match the icon's
+   final rendered footprint. Before the icon font loads, the browser falls back to a system font
+   that renders the ligature text literally (e.g. "close", "menu") — wider than the eventual
+   square icon glyph. With no size constraint, that swap reflows every row/button containing an
+   icon (sidebar, topbar, cards) the moment the font finishes loading, which is exactly the same
+   layout shift every page load regardless of data — confirmed via Lighthouse's "layout shift
+   culprits" after data-timing fixes left CLS completely unchanged. overflow:hidden clips the
+   wider fallback text so nothing visibly reflows or spills during the brief window before the
+   real glyph paints. */
+.material-symbols-outlined {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Chrome/Edge dim a number input's up/down spinner to near-invisible until the input is
+   hovered or focused — fine for most fields, but the Sample Findings carton/dimension/weight
+   inputs are meant to visibly invite incrementing at rest, not just on interaction. */
+.spinner-always-visible::-webkit-inner-spin-button,
+.spinner-always-visible::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+/* Rich-text ("Notes") chat composer — a contentEditable div, not a real <textarea>, so it has
+   no native placeholder attribute. :empty only matches when the browser leaves it truly empty;
+   most browsers instead leave a stray <br> after clearing it, which is why handleToggleRichMode
+   sets innerHTML = '' explicitly rather than relying on the user backspacing everything out. */
+.rich-composer-editable:empty:before {
+  content: attr(data-placeholder);
+  color: rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* Tailwind's preflight strips default list-style/margin from ul/li globally, which is fine
+   everywhere else in the app but means a bulleted list looks broken both while typing it in
+   the composer AND once sent — restore it scoped to both surfaces (the list is actually being
+   created correctly by execCommand in the composer, it's just invisible without this). */
+.rich-composer-editable ul,
+.rich-comment-body ul {
+  list-style: disc;
+  list-style-position: outside;
+  padding-left: 1.75em;
+  margin-left: 0.25em;
+}
+.rich-composer-editable ol,
+.rich-comment-body ol {
+  list-style: decimal;
+  list-style-position: outside;
+  padding-left: 1.75em;
+  margin-left: 0.25em;
+}
+
+/* Safety net, not the primary fix — an inline width baked into an already-sent message (or
+   any future edge case) can never blow past the chat bubble's own width once rendered, no
+   matter what size is actually stored. !important is deliberate here: this has to win over
+   whatever inline style="width:...px" the stored HTML carries. */
+.rich-comment-body img {
+  max-width: 100% !important;
+  height: auto !important;
+  cursor: zoom-in;
+}
 
 .scrollbar-hide {
   scrollbar-width: none;
@@ -9,6 +75,28 @@
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* A thin scrollbar instead of the browser default — on browsers/OSes with "overlay" scrollbars
+   enabled, the default renders on top of content rather than beside it, covering the last
+   ~15-20px of every row (count numbers, right-aligned icons) in narrow columns like the PLM
+   category sidebar. No scrollbar-gutter: stable here — that reserved scrollbar space even in
+   the collapsed 44px-wide view, squeezing the centered icons left of true center. */
+.plm-sidebar-scroll {
+  scrollbar-width: thin;
+}
+.plm-sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.plm-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.plm-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+}
+.plm-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .pl-table-scroll-wrap .pl-week-table-scroll {
@@ -70,6 +158,97 @@
   animation: fadeUp 0.35s ease forwards;
 }
 
+/* Stopwatch "set to now" icon (InspectionForm) — a hard on/off blink rather
+   than a soft fade, so it stays noticeable at a glance next to a form field. */
+@keyframes blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.15; }
+}
+
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+/* Weekend sea (Inspection Schedule week grid) — a masked water surface shown
+   only over the Sat/Sun columns (each column is exactly 100/7 = 14.286%).
+   One wave period is 400px, so shifting by exactly that loops seamlessly. */
+@keyframes waveShift {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-400px); }
+}
+
+.animate-wave-back  { animation: waveShift 16s linear infinite; }
+.animate-wave-front { animation: waveShift 9s linear infinite; }
+
+/* Weather readout (Inspection Schedule Week/Month cells). Every keyframe
+   here is hover-gated in JSX (group-hover/weather:animate-[...]), never
+   applied at rest, so the whole calendar grid stays still until a specific
+   cell's weather badge is actually hovered. Sun's ray-rotation reuses
+   Tailwind's built-in `spin` keyframe with a slower custom duration rather
+   than defining a redundant one here. */
+@keyframes weatherSunPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+/* Idle counterpart to weatherSunPulse above — plays at rest (Week view
+   only, gated by WeatherIcon's `animated` prop, not hover-gated like
+   everything else here) so the sun's glow breathes gently instead of
+   sitting dead-still. Deliberately slower and lower-amplitude than the
+   hover version so it reads as ambient, not attention-grabbing. */
+@keyframes weatherSunGlowPulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+@keyframes weatherCloudDriftSlow {
+  0%   { transform: translateX(-3px); }
+  50%  { transform: translateX(3px); }
+  100% { transform: translateX(-3px); }
+}
+@keyframes weatherCloudDriftFast {
+  0%   { transform: translateX(3px); }
+  50%  { transform: translateX(-3px); }
+  100% { transform: translateX(3px); }
+}
+@keyframes weatherCloudPass {
+  0%   { transform: translateX(-7px); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateX(7px); opacity: 0; }
+}
+@keyframes weatherFogDrift {
+  0%, 100% { transform: translateX(-2px); opacity: 0.5; }
+  50%      { transform: translateX(2px); opacity: 1; }
+}
+@keyframes weatherDropFall {
+  0%   { transform: translateY(-2px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(6px); opacity: 0; }
+}
+@keyframes weatherFlakeDrift {
+  0%   { transform: translate(0, -2px); opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: translate(3px, 7px); opacity: 0; }
+}
+@keyframes weatherLightningFlash {
+  0%, 88%, 100% { opacity: 0; }
+  92%, 96%      { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-wave-back,
+  .animate-wave-front,
+  .animate-blink {
+    animation: none;
+  }
+  /* Catches both the hover-triggered classes (group-hover/weather:animate-
+     [weatherX...]) and the Week-view idle classes (plain animate-
+     [weatherX...]) with one substring match — every weather keyframe name
+     starts with "weather", so "animate-[weather" is common to both forms. */
+  [class*="animate-[weather"] {
+    animation: none !important;
+  }
+}
+
 @media print {
   aside,
   header {
@@ -122,4 +301,40 @@
   tr {
     page-break-inside: avoid;
   }
+}
+/* Auto-shrink dense workspace surfaces (WorkspaceModal / PLMGuestChatPage / DemoWorkspaceModal)
+   on smaller desktop screens — see computeWorkspaceScale() in components/plm/plmMediaGroups.jsx.
+   Kept as real CSS (not a React inline style) so the unitless `zoom` value is never mangled
+   with a "px" suffix. vw/vh aren't affected by `zoom`, so 100vw / 0.8 = 125vw real px, which
+   `zoom: 0.8` then paints back to exactly the viewport width. */
+.ws-modal-scale {
+  width: 100%;
+  height: 100%;
+}
+.ws-modal-scale[data-scaled="1"] {
+  zoom: var(--ws-scale);
+  width: calc(100vw / var(--ws-scale));
+  height: calc(100vh / var(--ws-scale));
+}
+
+/* Thin blue scrollbars for every scroll area inside the workspace modal — the default
+   chunky grey bar ate a lot of the Media / SKU Details panels. `.scrollbar-hide` areas
+   (e.g. the chat composer) opt out and stay bar-less. */
+.ws-modal-root :not(.scrollbar-hide) {
+  scrollbar-width: thin;
+  scrollbar-color: #2563eb transparent;
+}
+.ws-modal-root :not(.scrollbar-hide)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.ws-modal-root :not(.scrollbar-hide)::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ws-modal-root :not(.scrollbar-hide)::-webkit-scrollbar-thumb {
+  background: #2563eb;
+  border-radius: 999px;
+}
+.ws-modal-root :not(.scrollbar-hide)::-webkit-scrollbar-thumb:hover {
+  background: #1d4ed8;
 }

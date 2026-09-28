@@ -2,13 +2,21 @@ import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { usePlmStore } from '../stores/plmStore'
 import { useAuthStore } from '../stores/authStore'
-import { useRole, useMemberId } from '../stores/profileStore'
+import { useRole, useMemberId, useOrgDepartment } from '../stores/profileStore'
+import { usePlmMasterKeyActive } from '../stores/plmMasterKeyStore'
 
 export function usePLMCatalog() {
   const session    = useAuthStore(s => s.session)
-  const role       = (useRole() || 'buyer').toLowerCase()
+  const orgRole    = (useRole() || 'buyer').toLowerCase()
+  const department = useOrgDepartment()
+  // A QA-department merchant member never gets the full merchant catalog — org type alone
+  // (useRole()) can't distinguish them from merchandising staff, so department overrides here.
+  // Scoped to exactly the SKUs they've been individually invited to (see fetchCatalog's 'qa'
+  // branch in plmStore.js), same restriction WorkspaceModal.jsx applies once a workspace is open.
+  const role       = (orgRole === 'merchant' && department === 'qa') ? 'qa' : orgRole
   const customerId = session?.user?.id
   const memberId   = useMemberId()
+  const masterKeyActive = usePlmMasterKeyActive()
 
   const fetchCatalog       = usePlmStore(s => s.fetchCatalog)
   const closeCatalogChannel = usePlmStore(s => s.closeCatalogChannel)
@@ -22,7 +30,9 @@ export function usePLMCatalog() {
     fetchCategories()
     fetchCatalog(memberId, customerId, role)
     return () => closeCatalogChannel()
-  }, [memberId, customerId, role])
+    // masterKeyActive is included so toggling PLM Master Key immediately refetches the
+    // catalog with is_read_only recomputed, instead of leaving stale read-only SKUs.
+  }, [memberId, customerId, role, masterKeyActive])
 
   // Open workspace from URL param — reacts to both initial load and dock-click
   // navigation. Only re-runs when the URL param itself changes (not on every

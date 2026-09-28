@@ -305,6 +305,7 @@ function MerchantSearchDropdown({ value, placeholder, onChange, onMemberSelected
     if (!merchantOrgIds?.length) return []
     let query = supabase.from('organization_members')
       .select('id, full_name, organizations(name, display_name)').in('organization_id', merchantOrgIds).eq('department', 'merchandising')
+      .is('removed_at', null)
     if (q) query = query.ilike('full_name', `%${q}%`)
     const { data } = await query.order('full_name', { ascending: true })
     return data || []

@@ -4,7 +4,15 @@ import { useSupplierOrgs, useOrgsLoading } from '../../../stores/orgsStore'
 import { useMemberId, useProfileStore } from '../../../stores/profileStore'
 import { useAuthStore } from '../../../stores/authStore'
 import SearchableSelect from '../../ui/SearchableSelect'
-import { resolveBuyerOrgsForMember, resolveSupplierOrgsForBuyer } from '../../../lib/poQueries'
+import { resolveBuyerOrgsForMember, resolveSupplierOrgsForBuyer, resolveBuyerOrgsForSupplier } from '../../../lib/poQueries'
+import { saveFormDraft, loadFormDraft, clearFormDraft } from '../../../utils/formDraft'
+// The actual PPT/PDF parsing runs as a backend worker job, entirely independent of the
+// browser — a page refresh mid-upload doesn't stop or lose it. What WAS lost is the
+// frontend's progress-polling loop (pure in-memory setInterval) and any way to reconnect to
+// it, so the SKUs would just silently appear in the catalog later with no completion notice
+// and no prompt to review/fill them in. This marker lets a reload pick the polling back up —
+// see catalogUploadDraft.js for why the key/TTL live in their own file, not here.
+import { UPLOAD_INFLIGHT_TTL_MS, uploadInflightKey } from '../../../utils/catalogUploadDraft'
 
 const SELECT_CLS = 'px-2.5 py-1.5 border border-black/[.18] rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50'
 
@@ -38,15 +46,25 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
   const [cascadedSuppliers,  setCascadedSuppliers]  = useState([])
   const [suppCascadeLoading, setSuppCascadeLoading] = useState(false)
   const [supplierError,      setSupplierError]      = useState(false)
+  const [buyerError,         setBuyerError]         = useState(false)
+  const [supplierBuyerOrgs,  setSupplierBuyerOrgs]  = useState([]) // buyers THIS vendor org actually works with
   const [fileTypeError,      setFileTypeError]      = useState(false)
   const [minimized,          setMinimized]          = useState(false)
   const [justCompleted,      setJustCompleted]      = useState(false)
+  const [activeUploadId,     setActiveUploadId]     = useState(null) // set once the worker's actually running — what Cancel targets
+  const [cancelling,         setCancelling]         = useState(false)
 
   const prevDoneRef = useRef(false)
   const fileRef     = useRef(null)
+  // Live only during the initial "uploading the file" phase (before an uploadId comes back) —
+  // handleCancel aborts the request itself through this so Cancel closes the narrow window
+  // where the upload could otherwise still succeed a moment after being "cancelled".
+  const uploadAbortRef = useRef(null)
 
   const uploadCatalog  = usePlmStore(s => s.uploadCatalog)
+  const cancelUploadAction = usePlmStore(s => s.cancelUpload)
   const addSkus        = usePlmStore(s => s.addSkus)
+  const toast          = usePlmStore(s => s.toast)
   const supplierList   = useSupplierOrgs()
   const suppLoading    = useOrgsLoading()
   const memberId       = useMemberId()
@@ -87,6 +105,18 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
       .finally(() => setSuppCascadeLoading(false))
   }, [buyer?.id, memberId, role])
 
+  // Vendor uploads previously had no buyer field at all — the SKUs it created carried no
+  // for_buyer_org_id, so no merchant's catalog fetch ever surfaced them. Scoped to buyers
+  // this vendor org actually has an active buyer_supplier_links relationship with, not
+  // every buyer in the system.
+  useEffect(() => {
+    if (role !== 'supplier' || !orgId) return
+    resolveBuyerOrgsForSupplier(orgId).then(orgs => {
+      setSupplierBuyerOrgs(orgs)
+      if (orgs.length === 1) setBuyer(orgs[0])
+    })
+  }, [role, orgId])
+
   useEffect(() => {
     const nowDone = isDone || isError
     if (nowDone && !prevDoneRef.current && minimized) {
@@ -104,15 +134,87 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
     if (file) runUpload(file)
   }
 
+  // Polls upload-status until the worker finishes (or errors/times out) — shared by a fresh
+  // upload and by resuming one still in flight after a reload. `ctx` carries whatever the
+  // completed SKUs' own fallback values need (supplier/season/memberId) since on resume these
+  // come from the saved marker, not necessarily from live component state at the time this
+  // is called (state set from the marker may not have flushed to a render yet).
+  const pollUploadStatus = (uploadId, ctx) => new Promise((resolve, reject) => {
+    const MAX_WAIT_MS = 10 * 60 * 1000
+    const startedAt   = Date.now()
+
+    const interval = setInterval(async () => {
+      try {
+        const API_BASE = import.meta.env.VITE_BACKEND_URL
+        const r    = await fetch(`${API_BASE}/plm/catalog/upload-status/${uploadId}`, {
+          headers: { Authorization: `Bearer ${useAuthStore.getState().session?.access_token}` }
+        })
+        const data = await r.json()
+        const { upload, skus } = data
+
+        const total     = upload.total_slides || 1
+        const processed = upload.slides_processed || 0
+        const pct       = Math.min(20 + Math.round((processed / total) * 75), 95)
+        setProgress(pct)
+        setMessage(
+          upload.status === 'processing' ? `Processing slide ${processed} of ${total}…`
+          : upload.status === 'queued'   ? 'Enhancing images and extracting text…'
+          : upload.status === 'done'     ? `Done — ${upload.sku_count} SKUs extracted`
+          : `Status: ${upload.status}`
+        )
+
+        if (upload.status === 'done') {
+          clearInterval(interval)
+          setProgress(100)
+          const normalizedSkus = (skus || [])
+            .map(s => ({
+              ...s,
+              supplier:             s.supplier             || ctx.supplierName || '',
+              season:               s.season               || ctx.season,
+              supplier_org_id:      s.supplier_org_id      || ctx.supplierId  || null,
+              created_by_member_id: s.created_by_member_id || ctx.memberId    || null,
+            }))
+            .sort((a, b) => (a.slide_index ?? 999) - (b.slide_index ?? 999))
+          setCreatedSkus(normalizedSkus)
+          addSkus(normalizedSkus)
+          setStatus('done')
+          setActiveUploadId(null)
+          clearFormDraft(uploadInflightKey(ctx.memberId))
+          resolve()
+        } else if (upload.status === 'error') {
+          clearInterval(interval)
+          setActiveUploadId(null)
+          clearFormDraft(uploadInflightKey(ctx.memberId))
+          reject(new Error(upload.error_message || 'Worker failed'))
+        } else if (Date.now() - startedAt > MAX_WAIT_MS) {
+          clearInterval(interval)
+          setActiveUploadId(null)
+          clearFormDraft(uploadInflightKey(ctx.memberId))
+          reject(new Error('Worker timed out — please try again'))
+        }
+      } catch (err) {
+        clearInterval(interval)
+        reject(err)
+      }
+    }, 4000)
+  })
+
   const runUpload = async (file) => {
-    if (!supplier?.id) { setSupplierError(true); return }
+    let blocked = false
+    if (!supplier?.id) { setSupplierError(true); blocked = true }
+    if (!buyer?.id)    { setBuyerError(true);    blocked = true }
+    if (blocked) return
     if (!/\.(pptx|pdf)$/i.test(file.name)) { setFileTypeError(true); return }
     setSupplierError(false)
+    setBuyerError(false)
     setFileTypeError(false)
 
     setStatus('uploading')
     setProgress(10)
     setMessage('Uploading file…')
+
+    const controller = new AbortController()
+    uploadAbortRef.current = controller
 
     try {
       const fd = new FormData()
@@ -124,73 +226,87 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
       if (buyer?.id) fd.append('buyerOrgId', buyer.id)
       if (role === 'supplier') fd.append('isSupplierUpload', 'true')
 
-      const result   = await uploadCatalog(fd)
+      const result   = await uploadCatalog(fd, controller.signal)
+      uploadAbortRef.current = null // request landed — nothing left for handleCancel to abort
       const uploadId = result.uploadId
       if (!uploadId) throw new Error('No uploadId returned')
+      setActiveUploadId(uploadId)
+
+      // Saved BEFORE polling starts — this is the long window (worker processing a whole
+      // deck) a refresh is actually likely to land in.
+      saveFormDraft(uploadInflightKey(memberId), {
+        uploadId, supplierId: supplier?.id, supplierName: supplier?.name,
+        season, buyerId: buyer?.id, buyerName: buyer?.name, memberId, mode, role,
+      })
 
       setMessage('Processing slides…')
       setProgress(20)
 
-      await new Promise((resolve, reject) => {
-        const MAX_WAIT_MS = 10 * 60 * 1000
-        const startedAt   = Date.now()
-
-        const interval = setInterval(async () => {
-          try {
-            const API_BASE = import.meta.env.VITE_BACKEND_URL
-            const r    = await fetch(`${API_BASE}/plm/catalog/upload-status/${uploadId}`, {
-              headers: { Authorization: `Bearer ${useAuthStore.getState().session?.access_token}` }
-            })
-            const data = await r.json()
-            const { upload, skus } = data
-
-            const total     = upload.total_slides || 1
-            const processed = upload.slides_processed || 0
-            const pct       = Math.min(20 + Math.round((processed / total) * 75), 95)
-            setProgress(pct)
-            setMessage(
-              upload.status === 'processing' ? `Processing slide ${processed} of ${total}…`
-              : upload.status === 'queued'   ? 'Enhancing images and extracting text…'
-              : upload.status === 'done'     ? `Done — ${upload.sku_count} SKUs extracted`
-              : `Status: ${upload.status}`
-            )
-
-            if (upload.status === 'done') {
-              clearInterval(interval)
-              setProgress(100)
-              const normalizedSkus = (skus || [])
-                .map(s => ({
-                  ...s,
-                  supplier:             s.supplier             || supplier?.name || '',
-                  season:               s.season               || season,
-                  supplier_org_id:      s.supplier_org_id      || supplier?.id  || null,
-                  created_by_member_id: s.created_by_member_id || memberId      || null,
-                }))
-                .sort((a, b) => (a.slide_index ?? 999) - (b.slide_index ?? 999))
-              setCreatedSkus(normalizedSkus)
-              addSkus(normalizedSkus)
-              setStatus('done')
-              resolve()
-            } else if (upload.status === 'error') {
-              clearInterval(interval)
-              reject(new Error(upload.error_message || 'Worker failed'))
-            } else if (Date.now() - startedAt > MAX_WAIT_MS) {
-              clearInterval(interval)
-              reject(new Error('Worker timed out — please try again'))
-            }
-          } catch (err) {
-            clearInterval(interval)
-            reject(err)
-          }
-        }, 4000)
-      })
+      await pollUploadStatus(uploadId, { supplierName: supplier?.name, supplierId: supplier?.id, season, memberId })
 
     } catch (err) {
+      // Deliberately aborted via handleCancel — it's already closing/toasting, so this isn't
+      // a real failure to surface as one.
+      if (err.name === 'AbortError') return
       setStatus('error')
       const msg = err.message === 'Failed to fetch'
         ? 'Could not reach the server — check your network connection, or contact support if the issue persists.'
         : 'Upload failed: ' + err.message
       setMessage(msg)
+    }
+  }
+
+  // Resume an upload that was still processing when the page last reloaded — reconnects the
+  // polling loop instead of leaving the SKUs to appear later with no completion notice and no
+  // review prompt. Runs once, only after memberId is known (needed to look up the right key).
+  const resumedRef = useRef(false)
+  useEffect(() => {
+    if (resumedRef.current || !memberId) return
+    resumedRef.current = true
+    const marker = loadFormDraft(uploadInflightKey(memberId), UPLOAD_INFLIGHT_TTL_MS)
+    if (!marker?.uploadId) return
+    setActiveUploadId(marker.uploadId)
+    if (marker.supplierId) setSupplier({ id: marker.supplierId, name: marker.supplierName })
+    if (marker.buyerId)    setBuyer({ id: marker.buyerId, name: marker.buyerName })
+    if (marker.season) setSeason(marker.season)
+    if (marker.mode)   setMode(marker.mode)
+    setStatus('uploading')
+    setProgress(20)
+    setMessage('Reconnecting to your upload…')
+    toast?.('Resuming your catalog upload from before the page reloaded')
+    pollUploadStatus(marker.uploadId, {
+      supplierName: marker.supplierName, supplierId: marker.supplierId, season: marker.season, memberId,
+    }).catch(err => {
+      setStatus('error')
+      setMessage('Could not resume: ' + err.message)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberId])
+
+  // True cancel: kills the running worker execution and removes whatever SKUs it already
+  // created for this upload (see POST /catalog/upload/:id/cancel) — not just closing the
+  // modal while the job keeps going in the background (that's what Minimize is for).
+  const handleCancel = async () => {
+    if (cancelling) return
+    // No uploadId yet means we're still in the initial "uploading the file" phase — nothing
+    // has reached the worker to cancel server-side. Abort the upload request itself instead,
+    // so it can't go on to quietly succeed (and save a resume-marker) a moment after being
+    // "cancelled" — see uploadAbortRef.
+    if (!activeUploadId) {
+      uploadAbortRef.current?.abort()
+      toast?.('Upload cancelled')
+      onClose()
+      return
+    }
+    setCancelling(true)
+    try {
+      await cancelUploadAction(activeUploadId)
+      clearFormDraft(uploadInflightKey(memberId))
+      toast?.('Upload cancelled')
+      onClose()
+    } catch (err) {
+      toast?.(err.message || 'Failed to cancel upload')
+      setCancelling(false)
     }
   }
 
@@ -249,9 +365,9 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
         </button>
         <button
           type="button"
-          title="Close"
-          onClick={e => { e.stopPropagation(); onClose() }}
-          disabled={isActive}
+          title={isActive ? 'Cancel upload' : 'Close'}
+          onClick={e => { e.stopPropagation(); handleCancel() }}
+          disabled={cancelling}
           className="w-6 h-6 flex items-center justify-center text-black/30 hover:text-black hover:bg-black/[.06] rounded cursor-pointer disabled:opacity-20 disabled:cursor-default text-[15px] leading-none"
         >
           ×
@@ -283,9 +399,9 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
                 <MinimiseIcon />
               </button>
               <button
-                onClick={onClose}
-                disabled={isActive}
-                title="Close"
+                onClick={handleCancel}
+                disabled={cancelling}
+                title={isActive ? 'Cancel upload' : 'Close'}
                 className="w-6 h-6 flex items-center justify-center text-black/35 hover:text-black hover:bg-black/[.06] rounded cursor-pointer disabled:opacity-25 disabled:cursor-default text-[17px] leading-none"
               >
                 ×
@@ -296,11 +412,13 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
           {/* Body */}
           <div className="p-5 flex flex-col gap-4">
 
-            {/* Mode picker */}
+            {/* Mode picker — "Existing Production SKU" links a batch to already-shipped
+                production records via a real PO; only merchants do that linking, so vendors
+                never get the option and stay on 'new' (the modal's default). */}
             <div className="flex flex-col gap-1.5">
               <span className="text-[11px] font-semibold uppercase tracking-[.06em] text-black/80">SKU Type</span>
               <div className="flex border border-black/15 overflow-hidden self-start">
-                {[['new', 'New SKU'], ['existing', 'Existing Production SKU']].map(([val, label]) => (
+                {(role === 'supplier' ? [['new', 'New SKU']] : [['new', 'New SKU'], ['existing', 'Existing Production SKU']]).map(([val, label]) => (
                   <button key={val} type="button"
                     disabled={!!status}
                     onClick={() => setMode(val)}
@@ -313,23 +431,23 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
               )}
             </div>
 
-            {/* Row 1: Buyer + Vendor (cascading) */}
-            {role !== 'supplier' && (
-              <div className={`grid gap-3 ${buyerOrgs.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                {buyerOrgs.length > 1 && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[11px] font-semibold uppercase tracking-[.06em] text-black/80">Buyer</label>
-                    <SearchableSelect
-                      options={buyerOrgs.map(b => ({ value: b.id, label: b.name }))}
-                      value={buyer?.id || ''}
-                      onChange={id => setBuyer(buyerOrgs.find(b => b.id === id) || null)}
-                      placeholder="Select buyer…"
-                      disabled={!!status}
-                      triggerClassName={SELECT_CLS}
-                      dropdownClassName="border border-black/[.15] rounded-md mt-0.5"
-                    />
-                  </div>
-                )}
+            {/* Row 1: Buyer + Vendor — merchant picks both (Buyer cascades Vendor's options);
+                vendor only picks Buyer (Vendor is implicitly their own org, never a field). */}
+            {role !== 'supplier' ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${buyerError ? 'text-red-500' : 'text-black/80'}`}>Buyer *</label>
+                  <SearchableSelect
+                    options={buyerOrgs.map(b => ({ value: b.id, label: b.name }))}
+                    value={buyer?.id || ''}
+                    onChange={id => { setBuyer(buyerOrgs.find(b => b.id === id) || null); setBuyerError(false) }}
+                    placeholder="Select buyer…"
+                    disabled={!!status}
+                    triggerClassName={`px-2.5 py-1.5 border rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50 ${buyerError ? 'border-red-500' : 'border-black/[.18]'}`}
+                    dropdownClassName="border border-black/[.15] rounded-md mt-0.5"
+                  />
+                  {buyerError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Fill in the required field(s)</span>}
+                </div>
                 <div className="flex flex-col gap-1">
                   <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${supplierError ? 'text-red-500' : 'text-black/80'}`}>Vendor *</label>
                   <SearchableSelect
@@ -348,6 +466,20 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
                   />
                   {supplierError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Fill in the required field(s)</span>}
                 </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${buyerError ? 'text-red-500' : 'text-black/80'}`}>Buyer *</label>
+                <SearchableSelect
+                  options={supplierBuyerOrgs.map(b => ({ value: b.id, label: b.name }))}
+                  value={buyer?.id || ''}
+                  onChange={id => { setBuyer(supplierBuyerOrgs.find(b => b.id === id) || null); setBuyerError(false) }}
+                  placeholder={supplierBuyerOrgs.length ? 'Select buyer…' : 'No buyers linked to your organisation yet'}
+                  disabled={!supplierBuyerOrgs.length || !!status}
+                  triggerClassName={`px-2.5 py-1.5 border rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50 ${buyerError ? 'border-red-500' : 'border-black/[.18]'}`}
+                  dropdownClassName="border border-black/[.15] rounded-md mt-0.5"
+                />
+                {buyerError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Fill in the required field(s)</span>}
               </div>
             )}
 
@@ -408,8 +540,8 @@ export default function CatalogUploadModal({ role, onClose, onDone }) {
 
           {/* Footer */}
           <div className="flex justify-end gap-3 px-5 py-3 border-t border-black/10">
-            <button onClick={onClose} disabled={isActive} className="px-4 py-2 text-[11px] font-bold uppercase tracking-[.06em] border border-black/20 bg-white cursor-pointer hover:bg-black/5 disabled:opacity-40 disabled:cursor-default">
-              {isDone ? 'Close' : 'Cancel'}
+            <button onClick={handleCancel} disabled={cancelling} className="px-4 py-2 text-[11px] font-bold uppercase tracking-[.06em] border border-black/20 bg-white cursor-pointer hover:bg-black/5 disabled:opacity-40 disabled:cursor-default">
+              {cancelling ? 'Cancelling…' : isDone ? 'Close' : 'Cancel'}
             </button>
             {isDone && (
               <button

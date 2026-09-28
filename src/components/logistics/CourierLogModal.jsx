@@ -278,6 +278,7 @@ function MerchantSearchDropdown({ value, placeholder, onChange }) {
       .select('id, full_name, organizations(name, display_name)')
       .in('organization_id', merchantOrgIds)
       .ilike('full_name', `%${q}%`)
+      .is('removed_at', null)
       .order('full_name', { ascending: true })
       .limit(10)
     return data || []

@@ -232,6 +232,7 @@ export default function PoUploadModal({ open, onClose, editPo = null, onSuccess 
       .from('organization_members')
       .select('id, full_name, role, department')
       .in('id', memberIds)
+      .is('removed_at', null)
 
     const filtered = (members || [])
       .filter(m => !['admin', 'owner'].includes(m.role) && m.department === 'merchandising')

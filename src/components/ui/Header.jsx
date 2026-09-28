@@ -37,15 +37,30 @@ export default function Header({ dept, profile, onLogout }) {
     <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-[90]">
 
       {/* ── Mobile layout (below lg) ─────────────────────────────────────────── */}
-      <div className="lg:hidden">
+      {/* One row, not two — identity (avatar+name+org) on the left, actions
+          on the right, instead of a full-width action-icons row stacked on
+          top of a full-width profile row. Halves the header's height for
+          what's otherwise just navigation chrome, not page content.
+          Sidebar's fixed hamburger button (top-2 left-2, 40x40px, so its own
+          right edge lands at 48px) is NOT part of this row's flex layout —
+          pl-12 (48px) alone puts the avatar flush against it with zero gap,
+          reading as one crowded cluster. pl-16 (64px) leaves a real 16px
+          gap instead. */}
+      <div className="lg:hidden flex items-center justify-between gap-2 pl-16 pr-3 py-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {avatar('w-8 h-8')}
+          <div className="min-w-0">
+            <h1 className="text-xs font-semibold text-gray-900 truncate leading-tight">{name}</h1>
+            <p className="text-[9px] font-medium text-gray-500 uppercase tracking-wide truncate leading-tight">{displayRole}</p>
+          </div>
+        </div>
 
-        {/* Row 1: action buttons — right-aligned, pl-14 clears the hamburger */}
-        <div className="flex items-center justify-end gap-1.5 pl-12 pr-3 pt-2 pb-1.5">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {isAdmin && (
             <button
               type="button"
               onClick={() => navigate('/admin/approvals')}
-              className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-[#1100ff] hover:bg-[#1100ff] hover:text-white transition-colors"
+              className="inline-flex items-center gap-1 h-8 px-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-[#1100ff] hover:bg-[#1100ff] hover:text-white transition-colors"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <polyline points="15 18 9 12 15 6" />
@@ -59,9 +74,9 @@ export default function Header({ dept, profile, onLogout }) {
               <button
                 type="button"
                 onClick={openDrawer}
-                className="relative flex items-center justify-center w-9 h-9 rounded-lg border border-gray-200 bg-white text-red-600 hover:bg-gray-50 transition-colors"
+                className="relative flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 bg-white text-red-600 hover:bg-gray-50 transition-colors"
               >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
                   <path d="M13.73 21a2 2 0 0 1-3.46 0" />
                 </svg>
@@ -78,25 +93,15 @@ export default function Header({ dept, profile, onLogout }) {
           <button
             type="button"
             onClick={handleLogout}
-            className="flex items-center justify-center w-9 h-9 rounded-lg border border-gray-900 bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-lg border border-gray-900 bg-gray-900 text-white hover:bg-gray-800 transition-colors"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
               <polyline points="16 17 21 12 16 7" />
               <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </button>
         </div>
-
-        {/* Row 2: profile identity */}
-        <div className="flex items-center gap-3 px-4 pb-3">
-          {avatar('w-10 h-10')}
-          <div className="min-w-0">
-            <h1 className="text-sm font-semibold text-gray-900 truncate leading-tight">{name}</h1>
-            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide truncate mt-0.5">{displayRole}</p>
-          </div>
-        </div>
-
       </div>
 
       {/* ── Desktop layout (lg+) ─────────────────────────────────────────────── */}
@@ -110,6 +115,23 @@ export default function Header({ dept, profile, onLogout }) {
               <h1 className="text-2xl font-semibold text-gray-900">{name}</h1>
               <p className="mt-1 text-[10px] font-medium text-gray-500 uppercase tracking-wide">{displayRole}</p>
             </div>
+            {role === 'Merchant' && (
+              <>
+                <button
+                  type="button"
+                  onClick={openDrawer}
+                  className="relative inline-flex items-center gap-2 px-5 py-3 rounded-lg border-2 border-red-200 bg-white text-base font-bold text-red-600 shadow-sm hover:bg-gray-50"
+                >
+                  Today's Alerts
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-2 -right-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white px-1">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+                <AlertsDrawer />
+              </>
+            )}
           </div>
 
           {/* Actions */}
@@ -124,13 +146,15 @@ export default function Header({ dept, profile, onLogout }) {
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => navigate('/user-manual')}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-black shadow-sm hover:bg-black hover:text-white transition-colors"
-            >
-              User Manual
-            </button>
+            {role !== 'Supplier' && (
+              <button
+                type="button"
+                onClick={() => navigate('/user-manual')}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-black shadow-sm hover:bg-black hover:text-white transition-colors"
+              >
+                User Manual
+              </button>
+            )}
 
             {(dept === 'Merchandising' || dept === '') && (
               <a
@@ -141,24 +165,6 @@ export default function Header({ dept, profile, onLogout }) {
               >
                 Mail
               </a>
-            )}
-
-            {role === 'Merchant' && (
-              <>
-                <button
-                  type="button"
-                  onClick={openDrawer}
-                  className="relative inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-red-600 shadow-sm hover:bg-gray-50"
-                >
-                  Alerts
-                  {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-bold text-white px-0.5">
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  )}
-                </button>
-                <AlertsDrawer />
-              </>
             )}
 
             <button

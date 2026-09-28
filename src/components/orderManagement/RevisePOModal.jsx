@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { usePOActions } from '../../hooks/usePOActions'
-import { FALLBACK_RATES, convertToUSD, fetchLiveRates } from '../../utils/formatters'
+import { FALLBACK_RATES, convertToUSD } from '../../utils/formatters'
 
 const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors placeholder:text-gray-400'
 const labelCls = 'block text-xs font-semibold text-gray-700 mb-1.5'
@@ -115,7 +115,16 @@ export default function RevisePOModal({ po, onClose, onSuccess }) {
     setPiFile(null)
     setProductDetailsFile(null)
     setError('')
-    fetchLiveRates().then(setRates)
+
+    // Derive the FX rate from the PO's own recorded amount/amount_usd instead of
+    // fetching a live rate, so the displayed conversion stays consistent with
+    // what was originally booked rather than drifting with the market rate.
+    const poCurrency = po.currency ?? 'USD'
+    if (poCurrency !== 'USD' && po.amount && po.amount_usd != null) {
+      setRates({ ...FALLBACK_RATES, [poCurrency]: po.amount_usd / po.amount })
+    } else {
+      setRates(FALLBACK_RATES)
+    }
   }, [po?.id])
 
   if (!po) return null

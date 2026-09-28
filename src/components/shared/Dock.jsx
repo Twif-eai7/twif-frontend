@@ -87,7 +87,10 @@ function DockItem({ children, className = '', onClick, mouseX, spring, distance,
       role="button"
     >
       {Children.map(children, child => cloneElement(child, { isHovered }))}
-      {badge && <div className="dock-badge" />}
+      {badge === true && <div className="dock-badge" />}
+      {typeof badge === 'number' && badge > 0 && (
+        <div className="dock-badge dock-badge-count">{badge > 9 ? '9+' : badge}</div>
+      )}
     </motion.div>
   )
 }
@@ -133,6 +136,7 @@ export default function Dock({
   distance     = 160,
   panelHeight  = 64,
   baseItemSize = 48,
+  active       = true,
 }) {
   const dockW = useMemo(
     () => items.length * (baseItemSize + 6) + 24,
@@ -266,6 +270,7 @@ export default function Dock({
             camera={{ position: [0, 0, 3.5], fov: 30 }}
             gl={{ antialias: true }}
             dpr={[1, 1.5]}
+            frameloop={active ? 'always' : 'never'}
           >
             <GlassScene />
           </Canvas>
@@ -295,7 +300,7 @@ export default function Dock({
               badge={item.badge}
             >
               <DockIcon>{item.icon}</DockIcon>
-              <DockLabel>{item.label}</DockLabel>
+              <DockLabel className={item.labelClassName}>{item.label}</DockLabel>
             </DockItem>
           ))}
         </div>

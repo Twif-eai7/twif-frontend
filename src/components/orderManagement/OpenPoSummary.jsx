@@ -187,9 +187,10 @@ export default function OpenPoSummary({
   availableYears = ["26", "27"],
   defaultYear = "27",
   defaultMonth = "",
-  defaultBuyer = "", 
+  defaultBuyer = "",
   defaultMerchant = "",
   defaultVendor = "",
+  defaultVendors = [],
   merchantList = [],
   isAdmin = false,
   onBackToDashboard,
@@ -198,6 +199,12 @@ export default function OpenPoSummary({
   const [buyer, setBuyer]             = useState(defaultBuyer);
   const [merchant, setMerchant] = useState(defaultMerchant);
   const [vendor, setVendor]           = useState(defaultVendor);
+  // Hidden baseline vendor scope (e.g. a merchant's resolved supplier access) —
+  // restricts rows before the user's own visible vendor dropdown filter applies.
+  const allowedVendorSet = useMemo(
+    () => defaultVendors.length ? new Set(defaultVendors.map(v => v.trim())) : null,
+    [defaultVendors]
+  );
   const [search, setSearch]           = useState("");
   const [sortCol, setSortCol]         = useState(null);
   const [sortDir, setSortDir]         = useState("asc");
@@ -216,15 +223,20 @@ export default function OpenPoSummary({
     useOpenPO({ year, buyer, month: monthSlugForApi, merchant, page, pageSize: PAGE_SIZE });
 
   // Add this after the useOpenPO call
-  const baseVendorList = useOpenPoStore(s => 
+  const baseVendorList = useOpenPoStore(s =>
     s.cache[`${year}__${buyer}____${merchant}`]?.vendorList ?? EMPTY_LIST
   )
+  const vendorDropdownOptions = useMemo(() => {
+    const base = baseVendorList.length ? baseVendorList : vendorList
+    return allowedVendorSet ? base.filter(v => allowedVendorSet.has(v)) : base
+  }, [baseVendorList, vendorList, allowedVendorSet])
 
   // Client-side filter predicate — shared by the on-screen table (filteredRows,
   // below) and the export handler, so a downloaded file can never diverge from
   // what's currently shown on screen.
   const matchesClientFilters = (r) => {
     if (buyer  && (r.customer || "").trim() !== buyer)  return false;
+    if (allowedVendorSet && !allowedVendorSet.has((r.vendor || "").trim())) return false;
     if (vendor && (r.vendor   || "").trim() !== vendor) return false;
     if (search) {
       const s = search.toLowerCase();
@@ -261,12 +273,13 @@ export default function OpenPoSummary({
 
 
   // ── filtered rows ──────────────────────────────────────────────────────────
-  const filteredRows = useMemo(() => rows.filter(matchesClientFilters), [rows, buyer, vendor, search]);
+  const filteredRows = useMemo(() => rows.filter(matchesClientFilters), [rows, buyer, vendor, search, allowedVendorSet]);
 
   // Helper — use grandTotals when available, fall back to page totals
   const gt = useMemo(() => {
-    // Use server overall only when no client-side filters are active
-    if (!vendor && !search) return overall ?? {}
+    // Use server overall only when no client-side filters (including the hidden
+    // baseline vendor scope) are active
+    if (!vendor && !search && !allowedVendorSet) return overall ?? {}
     // Vendor/search are client-side only — recompute totals from filtered rows
     return {
       orderValue:     filteredRows.reduce((s, r) => s + (r.orderValue     || 0), 0),
@@ -276,7 +289,7 @@ export default function OpenPoSummary({
       totalPoCount:   new Set(filteredRows.map(r => `${r.vendor}__${r.poNo}`)).size,
       totalLineCount: filteredRows.length,
     }
-  }, [vendor, search, overall, filteredRows])
+  }, [vendor, search, allowedVendorSet, overall, filteredRows])
 
   // ── totals ─────────────────────────────────────────────────────────────────
   const totals = useMemo(() => ({
@@ -593,7 +606,7 @@ useEffect(() => { setPage(1) }, [vendor, monthFilter, search])
         <Chip label="Open POs"      value={(gt.totalPoCount   ?? totals.openPOs).toLocaleString()}  dot="#9ca3af" />
         <Chip label="Total Lines"   value={(gt.totalLineCount ?? filteredRows.length).toLocaleString()} dot="#9ca3af" />
         <Chip label="Customers" value={
-          (vendor || search
+          (vendor || search || allowedVendorSet
             ? new Set(filteredRows.map(r => r.customer)).size
             : totalCustomers || 0
           ).toLocaleString()
@@ -629,7 +642,7 @@ useEffect(() => { setPage(1) }, [vendor, monthFilter, search])
         <Dropdown
           icon={<svg className="w-3.5 h-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>}
           placeholder="All Vendors"
-          options={baseVendorList.length ? baseVendorList : vendorList}
+          options={vendorDropdownOptions}
           value={vendor}
           onChange={setVendor}
         />
@@ -663,7 +676,7 @@ useEffect(() => { setPage(1) }, [vendor, monthFilter, search])
         </button>
 
         <span className="ml-auto text-xs text-gray-400 whitespace-nowrap">
-          {(gt.totalLineCount ?? 0).toLocaleString()} rows · {(vendor || search ? new Set(filteredRows.map(r => r.customer)).size : totalCustomers ?? 0).toLocaleString()} customers
+          {(gt.totalLineCount ?? 0).toLocaleString()} rows · {(vendor || search || allowedVendorSet ? new Set(filteredRows.map(r => r.customer)).size : totalCustomers ?? 0).toLocaleString()} customers
         </span>
       </div>
 

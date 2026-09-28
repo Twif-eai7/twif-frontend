@@ -52,10 +52,7 @@ export function OTPInput({ length = 6, onComplete, hasError = false, disabled = 
 
   return (
     <div className="my-5 w-full px-1">
-      <div
-        className="mx-auto grid w-full max-w-md gap-2 sm:gap-2.5"
-        style={{ gridTemplateColumns: `repeat(${length}, minmax(0, 1fr))` }}
-      >
+      <div className="flex justify-center gap-2 sm:gap-3">
         {vals.map((v, i) => (
           <input
             key={i}
@@ -70,7 +67,7 @@ export function OTPInput({ length = 6, onComplete, hasError = false, disabled = 
             onKeyDown={e => handleKeyDown(i, e)}
             onPaste={handlePaste}
             className={`
-              w-full min-w-0 aspect-5/6 text-center text-lg sm:text-xl font-semibold border rounded-xl
+              w-12 h-12 sm:w-14 sm:h-14 min-w-0 text-center text-lg sm:text-xl font-semibold border rounded-xl
               outline-none transition-all duration-150 caret-transparent
               ${hasError
                 ? 'border-red-400 bg-red-50 text-red-700'

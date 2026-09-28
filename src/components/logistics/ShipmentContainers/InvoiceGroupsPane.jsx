@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import NewInvoiceRow from './NewInvoiceRow'
 import { useInvoiceDetailsForm } from '../../../hooks/useInvoiceDetailsForm'
+import { fmtCbm } from '../../orderManagement/poUtils'
 
 function Spinner() {
   return (
@@ -10,17 +11,27 @@ function Spinner() {
   )
 }
 
+// Keys mirror shipment_invoices.status exactly (see
+// sql/shipment_invoice_manual_status.sql + sql/shipment_invoice_status_relabel.sql),
+// same set PendingWorkOverview.jsx's dropdown and MyShipmentPlansDrawer.jsx's
+// badge use — 'group' is the display alias for the DB default 'not_raised'.
 const STATUS_BADGE = {
-  group:  { text: 'Not Raised',      cls: 'bg-amber-100 text-amber-800' },
-  raised: { text: 'Raised · unbooked', cls: 'bg-blue-100 text-blue-800' },
-  booked: { text: 'Booked',          cls: 'bg-emerald-100 text-emerald-800' },
+  group:               { text: 'Not Raised', cls: 'bg-amber-100 text-amber-800' },
+  raised:              { text: 'Raised · unbooked', cls: 'bg-blue-100 text-blue-800' },
+  booking_pending:     { text: 'Booking Pending', cls: 'bg-orange-100 text-orange-800' },
+  do_carting_awaited:  { text: 'DO Carting Awaited', cls: 'bg-purple-100 text-purple-800' },
+  booked:              { text: 'Booked', cls: 'bg-emerald-100 text-emerald-800' },
 }
 
 // Same bar as isComplete in useInvoiceDetailsForm.js — only meaningful for
 // still-bare groups (status 'group'); raised/booked ones are guaranteed
-// complete already, since Raise Invoice can't fire without it.
+// complete already, since Raise Invoice can't fire without it. Must include
+// both file uploads too, or this drifts from the real isComplete exactly
+// like the Raise Invoice button once did — the list row said "Complete"
+// while the form it opens into said "Incomplete".
 function isGroupComplete(group) {
   return !!group.invoice_number?.trim() && !!group.invoice_date && !!group.invoice_value
+    && !!group.invoice_file_path && !!group.packing_list_file_path
 }
 
 function groupTitle(group) {
@@ -44,7 +55,7 @@ function actionLabel(status) {
 // Management → My Planned Shipments), so the multiselect here is always
 // locked. Booked invoices go further and lock everything, with no save
 // action at all — they're managed from the Containers stage instead.
-function GroupDetailsForm({ buyerOrgId, group, readOnly, onSaved, onGoToContainer }) {
+function GroupDetailsForm({ buyerOrgId, group, readOnly, onSaved, onGoToContainer, onBack }) {
   const [formOpen, setFormOpen] = useState(true)
   const {
     isRaising, isComplete, submitting, submittingAction, error,
@@ -55,6 +66,15 @@ function GroupDetailsForm({ buyerOrgId, group, readOnly, onSaved, onGoToContaine
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      <div className="md:hidden flex-shrink-0 px-4 pt-4">
+        <button type="button" onClick={onBack}
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-gray-800 transition-colors">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back to groups
+        </button>
+      </div>
       {readOnly && (
         <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 pt-4">
           <p className="text-[11px] text-gray-400">Read-only — manage this invoice from the Containers stage.</p>
@@ -128,9 +148,13 @@ function GroupDetailsForm({ buyerOrgId, group, readOnly, onSaved, onGoToContaine
 // lifecycle states for this buyer. Layout mirrors ContainerList +
 // ContainerDetail — a narrow left list and a right-hand detail pane for
 // whichever group is selected.
-export default function InvoiceGroupsPane({ buyerOrgId, groups, loading, onUpdated, onGoToContainer }) {
+// selectedGroupId/onSelectGroup are lifted to ShipmentContainersTab (same
+// pattern as selectedContainerId/ContainerDetail) so PendingWorkOverview.jsx
+// can jump straight to a specific invoice instead of just landing on this
+// stage and leaving the user to find it again in the list.
+export default function InvoiceGroupsPane({ buyerOrgId, groups, loading, onUpdated, onGoToContainer, selectedGroupId, onSelectGroup }) {
   const [search, setSearch] = useState('')
-  const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [expandedSkusId, setExpandedSkusId] = useState(null)
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -145,8 +169,11 @@ export default function InvoiceGroupsPane({ buyerOrgId, groups, loading, onUpdat
 
   return (
     <>
-      {/* Left: narrow list — same width/structure as ContainerList */}
-      <div className="flex flex-col bg-white border-gray-200 w-full md:w-72 md:border-r md:flex-shrink-0">
+      {/* Left: list — wider than ContainerList's own w-72 now that each row
+          carries labeled PO/vendor/CBM facts instead of bare values, which
+          need the extra room to sit side by side without truncating. */}
+      <div className={`flex-col bg-white border-gray-200 md:flex md:w-96 md:border-r md:flex-shrink-0
+        ${selected ? 'hidden md:flex' : 'flex w-full'}`}>
         <div className="px-3 pt-3 pb-3 border-b border-gray-200 flex-shrink-0 space-y-2">
           <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Invoice groups</span>
           <div className="relative">
@@ -175,20 +202,27 @@ export default function InvoiceGroupsPane({ buyerOrgId, groups, loading, onUpdat
           )}
           {!loading && filtered.map(group => {
             const badge = STATUS_BADGE[group.status]
+            const hasSkus = group.pos.some(po => po.lines?.length > 0)
+            const skusOpen = expandedSkusId === group.id
             return (
               <div
                 key={group.id}
-                onClick={() => setSelectedGroupId(group.id)}
+                onClick={() => onSelectGroup(group.id)}
                 className={`px-3 py-3.5 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors
                   ${selectedGroupId === group.id ? 'bg-gray-100 border-l-2 border-l-gray-900' : ''}`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="text-sm font-bold text-gray-900 truncate">{groupTitle(group)}</div>
+                  <div className="min-w-0">
+                    {group.invoice_number && (
+                      <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Invoice</div>
+                    )}
+                    <div className="text-sm font-bold text-gray-900 truncate">{groupTitle(group)}</div>
+                  </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {group.status === 'group' && (() => {
                       const complete = isGroupComplete(group)
                       return (
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${complete ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${complete ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-200 text-gray-700'}`}>
                           {complete ? 'Complete' : 'Incomplete'}
                         </span>
                       )
@@ -201,34 +235,97 @@ export default function InvoiceGroupsPane({ buyerOrgId, groups, loading, onUpdat
                 {group.pos.length === 0 ? (
                   <div className="text-xs text-gray-600 mt-0.5">—</div>
                 ) : (
-                  <div className="mt-1 space-y-0.5">
-                    {group.pos.map(po => (
-                      <div key={po.id} className="flex items-center justify-between gap-2">
-                        <span className="text-xs text-gray-700 truncate">{po.po_number}</span>
-                        <span className="text-[11px] text-gray-400 truncate">{po.actual_vendor_name || '—'}</span>
+                  <div className="mt-1.5">
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">PO Number</span>
+                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Vendor</span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {group.pos.map(po => (
+                        <div key={po.id} className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-semibold text-gray-900 truncate">{po.po_number}</span>
+                          <span className="text-[11px] font-medium text-gray-700 truncate">{po.actual_vendor_name || '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2 mt-2">
+                  {group.cbm != null ? (
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">CBM</span>
+                      <span className="text-xs font-bold text-gray-900">{fmtCbm(group.cbm)} m³</span>
+                    </div>
+                  ) : <span />}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {hasSkus && (
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setExpandedSkusId(skusOpen ? null : group.id) }}
+                        className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+                      >
+                        SKUs
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+                          className={`transition-transform ${skusOpen ? 'rotate-180' : ''}`}>
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); onSelectGroup(group.id) }}
+                      className={`text-[11px] font-semibold transition-colors
+                        ${group.status === 'group' ? 'text-indigo-600 hover:text-indigo-800' : 'text-gray-700 hover:text-gray-900'}`}
+                    >
+                      {actionLabel(group.status)}
+                    </button>
+                  </div>
+                </div>
+                {/* SKU breakdown — collapsed by default, this list card
+                    otherwise showed only PO numbers with no way to see what's
+                    actually inside without opening the full detail pane. */}
+                {skusOpen && (
+                  <div className="mt-2 space-y-1.5" onClick={e => e.stopPropagation()}>
+                    {group.pos.filter(po => po.lines?.length > 0).map(po => (
+                      // Indigo tint, not gray — needs to read as its own
+                      // surface against a row that's plain white by default,
+                      // gray-50 on hover, and gray-100 when selected; a
+                      // gray-* fill matched at least one of those three
+                      // states. Reuses the indigo accent this file already
+                      // uses for the "Raise Invoice" link.
+                      <div key={po.id} className="bg-indigo-50 border border-indigo-100 rounded-[8px] px-2.5 py-2">
+                        <div className="flex items-baseline gap-1.5 mb-1.5">
+                          <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">PO</span>
+                          <span className="text-[11px] font-bold text-gray-900 font-mono">{po.po_number}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">SKU</span>
+                          <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Qty</span>
+                        </div>
+                        <div className="space-y-0.5">
+                          {po.lines.map(l => (
+                            <div key={l.id} className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="min-w-0 flex-1 truncate font-semibold text-gray-800">
+                                {l.buyer_sku_ref || '—'}
+                                {l.sku_variant && <span className="ml-1 font-medium text-gray-600">{l.sku_variant}</span>}
+                              </span>
+                              <span className="flex-shrink-0 font-mono font-semibold text-gray-900">{l.quantity} pcs</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
-                <div className="flex items-center justify-between gap-2 mt-1.5">
-                  {group.cbm != null ? <span className="text-[11px] text-gray-500">CBM: {group.cbm}</span> : <span />}
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); setSelectedGroupId(group.id) }}
-                    className={`text-[11px] font-semibold transition-colors
-                      ${group.status === 'group' ? 'text-indigo-600 hover:text-indigo-800' : 'text-gray-600 hover:text-gray-900'}`}
-                  >
-                    {actionLabel(group.status)}
-                  </button>
-                </div>
               </div>
             )
           })}
         </div>
       </div>
 
-      {/* Right: detail pane for the selected group */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-50 w-full">
+      {/* Right: detail pane for the selected group — hidden on mobile until
+          a group is actually selected, same swap as the list above. */}
+      <div className={`flex-1 flex-col min-h-0 overflow-hidden bg-gray-50 w-full md:flex ${selected ? 'flex' : 'hidden md:flex'}`}>
         {!selected ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.5">
@@ -241,9 +338,16 @@ export default function InvoiceGroupsPane({ buyerOrgId, groups, loading, onUpdat
             key={selected.id}
             buyerOrgId={buyerOrgId}
             group={selected}
-            readOnly={selected.status === 'booked'}
+            // Requiring container_id too, not just the manual 'booked' label,
+            // matters because the two are no longer tied together — marking
+            // status 'booked' a beat before a container is actually attached
+            // would otherwise lock this pane read-only with a "Go to
+            // Container" link that has nowhere to go (container_id null),
+            // stranding the invoice with no in-UI way to edit it back.
+            readOnly={selected.status === 'booked' && !!selected.container_id}
             onSaved={() => onUpdated?.()}
             onGoToContainer={onGoToContainer}
+            onBack={() => onSelectGroup(null)}
           />
         )}
       </div>

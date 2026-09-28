@@ -71,6 +71,30 @@ export function titleCaseName(str) {
     .join(' ')
 }
 
+// ── Container booking status ──────────────────────────────────────────────────
+// container_number is NOT NULL on shipment_containers, so a container can be
+// created (and invoices attached to it) before the real number is known — the
+// convention is to type "TBA" as a placeholder. An invoice/group with
+// container_id set is therefore not necessarily actually booked yet; check
+// the container's own number before calling it "Booked" rather than trusting
+// container_id presence alone.
+export function isContainerNumberConfirmed(containerNumber) {
+  const n = (containerNumber || '').trim().toUpperCase()
+  return n.length > 0 && n !== 'TBA'
+}
+
+// ── Date + time ───────────────────────────────────────────────────────────────
+// Short, locale-stable "2 Sep 2026, 14:30". Returns '—' for missing/invalid input.
+export function formatDateTime(value) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
 export function formatPercent(value) {
   if (value == null) return '0%'
   if (typeof value === 'string' && value.endsWith('%')) return value

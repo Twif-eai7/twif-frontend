@@ -6,8 +6,8 @@ import { useAuth } from './useAuth'
 /**
  * useAdminCheck
  *
- * Verifies the current user is an owner or admin of an org
- * with type = 'merchant'. Redirects to /dashboard if not.
+ * Verifies the current user is an owner or admin of a merchant-type org AND
+ * in the tech department specifically. Redirects to /dashboard if not.
  *
  * Returns { isAdmin, checking }
  */
@@ -36,7 +36,7 @@ export function useAdminCheck() {
         .eq('user_id', session.user.id)
         .in('role', ['admin', 'owner'])
         .eq('organizations.type', 'merchant')
-        .or('department.eq.tech,department.is.null')
+        .eq('department', 'tech')
         .maybeSingle()
 
       if (!data) {

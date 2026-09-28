@@ -133,7 +133,7 @@ export default function SamplePOModal({ workspaceIds, onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 z-[1010] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
-      <div className="bg-white w-[660px] max-h-[88vh] rounded-md shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-white w-full max-w-[660px] mx-3 max-h-[88vh] rounded-md shadow-2xl flex flex-col overflow-hidden">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-black/10">
@@ -152,7 +152,7 @@ export default function SamplePOModal({ workspaceIds, onClose, onCreated }) {
           <div className="flex-1 overflow-y-auto flex flex-col">
 
             {/* Buyer + Supplier */}
-            <div className="grid grid-cols-2 gap-6 px-6 py-4 border-b border-black/[.07]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 px-6 py-4 border-b border-black/[.07]">
               <OrgBlock label="Buyer" org={buyerOrg} />
               <OrgBlock label="Supplier" org={supplierOrg} />
             </div>

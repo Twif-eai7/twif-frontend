@@ -98,11 +98,12 @@ export function useFetchPOs() {
           `*,
           buyer_supplier_links!inner (
             buyer_org_id,
+            supplier_org_id,
             buyer:organizations!buyer_supplier_links_buyer_org_id_fkey (display_name),
             supplier:organizations!buyer_supplier_links_supplier_org_id_fkey (display_name)
           ),
           po_line_items (
-            id, buyer_sku_ref, sku_variant,
+            id, sku_id, buyer_sku_ref, sku_variant,
             quantity_ordered, unit_price, order_value_usd,
             shipped_quantity, shipped_value_usd,
             balance_quantity, balance_value_usd,
@@ -116,7 +117,7 @@ export function useFetchPOs() {
         .is('deleted_at', null)
         .is('delete_meta', null)
         .neq('status', 'closed')
-        .gte('po_received_date', '2026-01-01')
+        .gte('po_received_date', '2025-09-01')
         .is('erp_last_synced_at',null)
         .order('created_at', { ascending: false })
         .range(from, to)
@@ -168,6 +169,7 @@ export function useFetchPOs() {
         buyer_name:        po.buyer_supplier_links?.buyer?.display_name    ?? null,
         supplier_name:     po.buyer_supplier_links?.supplier?.display_name ?? null,
         buyer_org_id:      po.buyer_supplier_links?.buyer_org_id           ?? null,
+        supplier_org_id:   po.buyer_supplier_links?.supplier_org_id        ?? null,
         on_behalf_of_name: po.onBehalf?.full_name                          ?? null,
         on_behalf_of_dept: po.onBehalf?.department                         ?? null,
       }))

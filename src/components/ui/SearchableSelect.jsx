@@ -23,8 +23,26 @@ export default function SearchableSelect({
 
   const selected = options.find(o => String(o.value) === String(value))
 
+  // While searching, matches are re-ranked by relevance so the closest hit
+  // sits on top instead of wherever it happened to fall in the source list
+  // (e.g. typing "332" should surface "PO332" above "433204", and "23"
+  // should surface a PO literally named "23"). Order is left untouched when
+  // there's no search term.
   const filtered = search
-    ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
+    ? options
+        .filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => {
+          const q = search.toLowerCase()
+          const la = a.label.toLowerCase(), lb = b.label.toLowerCase()
+          const exactA = la === q, exactB = lb === q
+          if (exactA !== exactB) return exactA ? -1 : 1              // exact match first
+          const startA = la.startsWith(q), startB = lb.startsWith(q)
+          if (startA !== startB) return startA ? -1 : 1             // then prefix matches
+          if (la.length !== lb.length) return la.length - lb.length  // then shortest (closest to the query)
+          const idxA = la.indexOf(q), idxB = lb.indexOf(q)
+          if (idxA !== idxB) return idxA - idxB                     // then earliest match position
+          return la < lb ? -1 : la > lb ? 1 : 0                     // stable alphabetical tiebreak
+        })
     : options
 
   // Reset highlight when search changes or dropdown opens

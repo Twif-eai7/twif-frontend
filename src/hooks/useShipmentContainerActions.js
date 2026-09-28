@@ -49,7 +49,7 @@ export function useShipmentContainerActions() {
   // every leg insert happen in one transaction server-side (record_shipment_legs
   // RPC), replacing what used to be two separate client-side writes. The
   // idempotency key makes a retried/double-clicked submit a safe no-op.
-  const recordShipmentLegs = useCallback(async (invoiceId, legs, blNumber, cartons) => {
+  const recordShipmentLegs = useCallback(async (invoiceId, legs, blNumber, cartons, shippedDate) => {
     const { error } = await supabase.rpc('record_shipment_legs', {
       p_invoice_id: invoiceId,
       p_legs: legs,
@@ -57,6 +57,7 @@ export function useShipmentContainerActions() {
       p_cartons: cartons,
       p_created_by: memberId,
       p_idempotency_key: crypto.randomUUID(),
+      p_shipped_date: shippedDate,
     })
     if (error) throw error
   }, [memberId])
@@ -106,6 +107,19 @@ export function useShipmentContainerActions() {
     if (error) throw error
   }, [memberId])
 
+  // Manual lifecycle status (see sql/shipment_invoice_manual_status.sql) goes
+  // through this RPC rather than a plain updateInvoice() call — it carries
+  // its own auth check + value validation, same one usePendingWorkOverview.js
+  // already calls from its own status dropdown.
+  const updateInvoiceStatus = useCallback(async (invoiceId, status) => {
+    const { error } = await supabase.rpc('update_shipment_invoice_status', {
+      p_invoice_id: invoiceId,
+      p_status: status,
+      p_updated_by: memberId,
+    })
+    if (error) throw error
+  }, [memberId])
+
   const removePoFromInvoice = useCallback(async (shipmentInvoiceId, poId) => {
     const { error } = await supabase
       .from('shipment_invoice_pos')
@@ -127,22 +141,18 @@ export function useShipmentContainerActions() {
         .delete().eq('shipment_invoice_id', groupId)
       if (rmErr) throw rmErr
 
-      // One at a time, since the "one active plan per PO" unique index can
-      // reject an individual row (already re-planned elsewhere) without
-      // that blocking the rest — same defensive fallback as the composition
-      // diff in useInvoiceDetailsForm's submit().
-      for (const poId of poIds) {
-        const { error: revertErr } = await supabase.from('po_shipment_plans')
-          .update({ status: 'draft', shipment_invoice_id: null, updated_on: new Date().toISOString(), updated_by: memberId })
-          .eq('shipment_invoice_id', groupId).eq('po_id', poId).eq('status', 'grouped')
-        if (revertErr) {
-          if (revertErr.code !== '23505') throw revertErr
-          const { error: cancelErr } = await supabase.from('po_shipment_plans')
-            .update({ status: 'cancelled', shipment_invoice_id: null, updated_on: new Date().toISOString(), updated_by: memberId })
-            .eq('shipment_invoice_id', groupId).eq('po_id', poId).eq('status', 'grouped')
-          if (cancelErr) throw cancelErr
-        }
-      }
+      // A PO can now hold more than one active plan, so this can no longer
+      // collide with another draft/pending plan for the same PO — one
+      // batched update is enough (see the equivalent fix in
+      // useInvoiceDetailsForm.js's toRemove handling). planned_by is left
+      // untouched — the original planner should still find their own plan
+      // reverted back to draft; useMyShipmentPlans.js grants admin/owner/tech
+      // full cross-planner visibility instead of reassigning ownership away
+      // from whoever actually drafted it.
+      const { error: revertErr } = await supabase.from('po_shipment_plans')
+        .update({ status: 'draft', shipment_invoice_id: null, updated_on: new Date().toISOString(), updated_by: memberId })
+        .eq('shipment_invoice_id', groupId).in('po_id', poIds).eq('status', 'grouped')
+      if (revertErr) throw revertErr
     }
 
     const { error: delErr } = await supabase.from('shipment_invoices')
@@ -169,6 +179,7 @@ export function useShipmentContainerActions() {
     editShipmentLeg,
     updateContainer,
     updateInvoice,
+    updateInvoiceStatus,
     removePoFromInvoice,
     ungroupPlans,
     softDeleteContainer,

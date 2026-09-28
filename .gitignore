@@ -43,3 +43,8 @@ coverage/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# Supabase CLI's own local version-cache, not project config
+supabase/.temp
+
+# Keep npm lockfiles and project config tracked (do not use blanket *.json)

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAdminCheck } from '../../hooks/useAdminCheck'
 import { useApprovals } from '../../hooks/useApprovals'
+import { useTerApprovals } from '../../hooks/useTerApprovals'
 import { useAuth } from '../../hooks/useAuth'
 import { AdminShell } from '../../components/admin/AdminShell'
 import {
@@ -9,8 +10,10 @@ import {
   ApproveButton, RejectButton, RejectModal
 } from '../../components/admin/AdminUi'
 import { NdaPreviewModal } from '../../components/admin/NdaPreviewModal'
+import { NdaDocModal } from '../../components/admin/NdaDocModal'
 import { NdaSignModal } from '../../components/admin/NdaSignModal'
 import { Spinner } from '../../components/ui/Spinner'
+import { formatDateTime } from '../../utils/formatters'
 
 // ─── Tab button ───────────────────────────────────────────────
 function Tab({ active, onClick, children, count }) {
@@ -65,6 +68,84 @@ function RequestRow({ req, onApprove, onReject, acting }) {
   )
 }
 
+// ─── Done button ──────────────────────────────────────────────
+function DoneButton({ onClick, loading, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading || disabled}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+    >
+      {loading ? <Spinner size="w-3 h-3" light={false} /> : (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="m2 6 2.5 2.5 5.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      Done
+    </button>
+  )
+}
+
+// ─── Decline button ─────────────────────────────────────────────
+function DeclineButton({ onClick, loading, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading || disabled}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+    >
+      {loading ? <Spinner size="w-3 h-3" light={false} /> : (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="m3 3 6 6m0-6L3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )}
+      Decline
+    </button>
+  )
+}
+
+// ─── TER row ──────────────────────────────────────────────────
+function TerRow({ ter, onApprove, onMarkDone, onDecline, acting }) {
+  const isApproving = acting?.id === ter.id && acting?.action === 'approve'
+  const isMarkingDone = acting?.id === ter.id && acting?.action === 'done'
+  const isDeclining = acting?.id === ter.id && acting?.action === 'decline'
+  const isBusy = isApproving || isMarkingDone || isDeclining
+  return (
+    <tr className="border-b border-stone-100 hover:bg-stone-50 transition-colors">
+      <td className="py-3 px-4">
+        <div className="text-sm font-medium text-stone-900">{ter.title}</div>
+        <div className="text-xs text-stone-400 mt-0.5 line-clamp-1">{ter.description}</div>
+      </td>
+      <td className="py-3 px-4">
+        <div className="text-sm text-stone-700">{ter.organization_members?.full_name || '-'}</div>
+      </td>
+      <td className="py-3 px-4">
+        <Badge label={ter.priority} />
+      </td>
+      <td className="py-3 px-4">
+        <Badge label={ter.status} />
+      </td>
+      <td className="py-3 px-4 text-xs text-stone-400">
+        {new Date(ter.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+      </td>
+      <td className="py-3 px-4">
+        <div className="flex items-center gap-2">
+          {ter.status === 'submitted' ? (
+            <ApproveButton onClick={() => onApprove(ter.id)} loading={isApproving} disabled={isBusy} />
+          ) : (
+            <span className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg">
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="m2 6 2.5 2.5 5.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              Approved
+            </span>
+          )}
+          <DoneButton onClick={() => onMarkDone(ter.id)} loading={isMarkingDone} disabled={isBusy} />
+          <DeclineButton onClick={() => onDecline(ter.id)} loading={isDeclining} disabled={isBusy} />
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 // ─── Verify / Sign / Approve step button ───────────────────────
 function StepButton({ label, doneLabel, done, disabled, loading, onClick }) {
   if (done) {
@@ -88,7 +169,7 @@ function StepButton({ label, doneLabel, done, disabled, loading, onClick }) {
 }
 
 // ─── Pending org row ──────────────────────────────────────────
-function OrgRow({ org, onApprove, onReject, onOpenPreview, onOpenSign, acting }) {
+function OrgRow({ org, onApprove, onReject, onOpenPreview, onOpenSign, onOpenDoc, acting }) {
   const [expanded, setExpanded] = useState(false)
   const owner = org.organization_members?.find(m => m.role === 'owner')
   const supplier = Array.isArray(org.supplier_details) ? org.supplier_details[0] : org.supplier_details
@@ -135,11 +216,28 @@ function OrgRow({ org, onApprove, onReject, onOpenPreview, onOpenSign, acting })
         <td className="py-3 px-4"><Badge label={org.type} /></td>
         <td className="py-3 px-4 text-sm text-stone-600">{org.country || '—'}</td>
         <td className="py-3 px-4 text-xs text-stone-400">
-          {new Date(org.created_on).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          {formatDateTime(org.created_on)}
         </td>
         <td className="py-3 px-4">
           {isSupplier ? (
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => onOpenDoc(org)}
+              title="Preview NDA"
+              aria-label="Preview NDA"
+              className="text-stone-500 hover:text-stone-900 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13h10" />
+              </svg>
+            </button>
+          ) : (
+            <span className="text-xs text-stone-300">—</span>
+          )}
+        </td>
+        <td className="py-3 px-4 whitespace-nowrap">
+          {isSupplier ? (
+            <div className="flex items-center gap-1.5">
               <StepButton
                 label="Verify" doneLabel="Verified" done={isVerified}
                 loading={isVerifying} disabled={isBusy}
@@ -163,7 +261,7 @@ function OrgRow({ org, onApprove, onReject, onOpenPreview, onOpenSign, acting })
       </tr>
       {isSupplier && expanded && (
         <tr className="border-b border-stone-100 bg-stone-50">
-          <td colSpan={6} className="py-4 px-4">
+          <td colSpan={7} className="py-4 px-4">
             <div className="grid grid-cols-3 gap-x-6 gap-y-3 text-xs">
               {org.country === 'Sri Lanka' ? (
                 <>
@@ -209,6 +307,22 @@ function OrgRow({ org, onApprove, onReject, onOpenPreview, onOpenSign, acting })
                 )}
               </div>
             </div>
+
+            <div className="mt-4 pt-3 border-t border-stone-200">
+              <div className="text-stone-400 uppercase tracking-wider mb-1.5 text-xs">Internal notes</div>
+              {(org.admin_notes?.length ? [...org.admin_notes].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)) : []).length === 0 ? (
+                <div className="text-xs text-stone-400">No notes yet.</div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {[...org.admin_notes].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(n => (
+                    <div key={n.id} className="bg-white border border-stone-200 rounded-lg px-3 py-2">
+                      <div className="text-[11px] text-stone-400">{n.author_name || 'Admin'} · {formatDateTime(n.created_at)}</div>
+                      <p className="text-xs text-stone-700 whitespace-pre-wrap mt-0.5">{n.note}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </td>
         </tr>
       )}
@@ -239,14 +353,21 @@ export default function ApprovalsPage() {
   const { session } = useAuth()
   const {
     requests, pendingOrgs, loading, error, acting,
-    approveRequest, rejectRequest, approveOrg, rejectOrg,
+    approveRequest, rejectRequest, approveOrg, rejectOrg, addOrgNote,
     previewOrgPdf, verifyOrg, signOrg,
   } = useApprovals()
+  const {
+    requests: pendingTers, loading: terLoading, error: terError, acting: terActing,
+    approveTer, markDone, declineTer,
+  } = useTerApprovals()
+  // Tech Enhancement Requests are suspended on Twif.
+  const canSeeTerTab = false
 
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState(() => (searchParams.get('tab') === 'orgs' ? 'orgs' : 'requests')) // 'requests' | 'orgs'
   const [rejectTarget, setRejectTarget] = useState(null) // { id, type: 'request'|'org', name }
   const [previewTarget, setPreviewTarget] = useState(null) // { id, name }
+  const [docTarget, setDocTarget] = useState(null) // { id, name } — NDA preview/download
   const [signTarget, setSignTarget] = useState(null) // { id, name }
   const [signError, setSignError] = useState('')
   const [actionError, setActionError] = useState('')
@@ -268,6 +389,25 @@ export default function ApprovalsPage() {
     if (!result.success) setActionError(result.error)
   }
 
+
+  async function handleApproveTer(id) {
+    setActionError('')
+    const result = await approveTer(id)
+    if (!result.success) setActionError(result.error)
+  }
+
+  async function handleMarkDone(id) {
+    setActionError('')
+    const result = await markDone(id)
+    if (!result.success) setActionError(result.error)
+  }
+
+  async function handleDeclineTer(id) {
+    setActionError('')
+    const result = await declineTer(id)
+    if (!result.success) setActionError(result.error)
+  }
+
   async function handleRejectConfirm(reason) {
     setActionError('')
     const { id, type } = rejectTarget
@@ -283,6 +423,13 @@ export default function ApprovalsPage() {
     const result = await verifyOrg(previewTarget.id)
     if (!result.success) setActionError(result.error)
     setPreviewTarget(null)
+  }
+
+  async function handleAddNote(text) {
+    setActionError('')
+    const result = await addOrgNote(previewTarget.id, text)
+    if (!result.success) setActionError(result.error)
+    return result
   }
 
   async function handleSubmitSign(payload) {
@@ -306,6 +453,12 @@ export default function ApprovalsPage() {
             count={requests.length}>
             Join &amp; Claim requests
           </Tab>
+          {canSeeTerTab && (
+            <Tab active={tab === 'ter'} onClick={() => setTab('ter')}
+              count={pendingTers.length}>
+              Tech Enhancement Requests
+            </Tab>
+          )}
           <Tab active={tab === 'orgs'} onClick={() => setTab('orgs')}
             count={pendingOrgs.length}>
             New organisations
@@ -318,7 +471,40 @@ export default function ApprovalsPage() {
           </div>
         )}
 
-        {loading ? (
+        {tab === 'ter' ? (
+          terLoading ? (
+            <TableSkeleton rows={6} />
+          ) : terError ? (
+            <div className="text-sm text-red-600">{terError}</div>
+          ) : pendingTers.length === 0 ? (
+            <EmptyState
+              icon={<svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="m5.75 8 2 2 4.5-5.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              title="No pending requests"
+              subtitle="All tech enhancement requests have been actioned."
+            />
+          ) : (
+            <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-stone-100">
+                    {['Title', 'Requested by', 'Priority', 'Status', 'Submitted', 'Actions'].map(h => (
+                      <th key={h} className="py-2.5 px-4 text-left text-xs font-medium text-stone-400 uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingTers.map(ter => (
+                    <TerRow key={ter.id} ter={ter} acting={terActing}
+                      onApprove={handleApproveTer}
+                      onMarkDone={handleMarkDone}
+                      onDecline={handleDeclineTer}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : loading ? (
           <TableSkeleton rows={6} />
         ) : error ? (
           <div className="text-sm text-red-600">{error}</div>
@@ -401,7 +587,7 @@ export default function ApprovalsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-stone-100">
-                    {['Organisation', 'Owner', 'Type', 'Country', 'Submitted', 'Actions'].map(h => (
+                    {['Organisation', 'Owner', 'Type', 'Country', 'Submitted', 'Agreement', 'Actions'].map(h => (
                       <th key={h} className="py-2.5 px-4 text-left text-xs font-medium text-stone-400 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
@@ -413,6 +599,7 @@ export default function ApprovalsPage() {
                       onReject={o => setRejectTarget({ id: o.id, type: 'org', name: o.display_name || o.name })}
                       onOpenPreview={o => setPreviewTarget({ id: o.id, name: o.display_name || o.name })}
                       onOpenSign={o => { setSignError(''); setSignTarget({ id: o.id, name: o.display_name || o.name }) }}
+                      onOpenDoc={o => setDocTarget({ id: o.id, name: o.display_name || o.name })}
                     />
                   ))}
                 </tbody>
@@ -423,14 +610,22 @@ export default function ApprovalsPage() {
       </div>
 
       {/* Reject modal */}
-      {rejectTarget && (
-        <RejectModal
-          title={`Reject ${rejectTarget.type === 'org' ? 'organisation' : 'request'} — ${rejectTarget.name}`}
-          onConfirm={handleRejectConfirm}
-          onCancel={() => setRejectTarget(null)}
-          loading={acting?.id === rejectTarget.id && acting?.action === 'reject'}
-        />
-      )}
+      {rejectTarget && (() => {
+        const orgNotes = rejectTarget.type === 'org'
+          ? [...(pendingOrgs.find(o => o.id === rejectTarget.id)?.admin_notes || [])]
+              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+          : []
+        return (
+          <RejectModal
+            title={`Reject ${rejectTarget.type === 'org' ? 'organisation' : 'request'} - ${rejectTarget.name}`}
+            onConfirm={handleRejectConfirm}
+            onCancel={() => setRejectTarget(null)}
+            loading={acting?.id === rejectTarget.id && acting?.action === 'reject'}
+            requireReason={rejectTarget.type === 'org' && orgNotes.length === 0}
+            defaultReason={orgNotes.length ? orgNotes[orgNotes.length - 1].note : ''}
+          />
+        )
+      })()}
 
       {/* Step 1: Verify — review the exact PDF before it can be signed */}
       {previewTarget && (
@@ -440,6 +635,22 @@ export default function ApprovalsPage() {
           onConfirm={handleConfirmVerify}
           onCancel={() => setPreviewTarget(null)}
           confirming={acting?.id === previewTarget.id && acting?.action === 'verify'}
+          onReject={() => { setPreviewTarget(null); setRejectTarget({ id: previewTarget.id, type: 'org', name: previewTarget.name }) }}
+          onAddNote={handleAddNote}
+          noteBusy={acting?.id === previewTarget.id && acting?.action === 'comment'}
+          notes={(pendingOrgs.find(o => o.id === previewTarget.id)?.admin_notes || [])
+            .slice()
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))}
+        />
+      )}
+
+      {/* NDA preview + download (read-only, no side effects) */}
+      {docTarget && (
+        <NdaDocModal
+          orgId={docTarget.id}
+          orgName={docTarget.name}
+          accessToken={session?.access_token}
+          onClose={() => setDocTarget(null)}
         />
       )}
 

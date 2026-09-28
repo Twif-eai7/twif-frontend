@@ -191,8 +191,22 @@ export default function NewContainerForm({ onClose, onCreate, buyerOrgId, buyerN
           <div className="flex items-end gap-2 px-3 pb-3 [@media(max-height:850px)]:pb-2">
             <div className="flex-[1.4] min-w-0">
               <CompactField label="Port of Loading">
-                <input type="text" value={portOfLoading} onChange={e => setPortOfLoading(e.target.value)}
-                  placeholder="Nhava Sheva" className={compactInputCls} />
+                <div className="relative">
+                  <select value={portOfLoading} onChange={e => setPortOfLoading(e.target.value)}
+                    className={`${compactInputCls} appearance-none pr-5`}>
+                    <option value="">Select</option>
+                    <option value="Mundra">Mundra</option>
+                    <option value="Nahva Sheva">Nahva Sheva</option>
+                    <option value="Pipavav">Pipavav</option>
+                    <option value="New Delhi">New Delhi</option>
+                    <option value="Tuticorin">Tuticorin</option>
+                    <option value="Chennai">Chennai</option>
+                  </select>
+                  <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-gray-400 pointer-events-none"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </div>
               </CompactField>
             </div>
             <div className="flex-[1.4] min-w-0">

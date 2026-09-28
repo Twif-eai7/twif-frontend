@@ -1,9 +1,11 @@
 import { useState, useRef } from 'react'
-import { publicUrl, fmt$, fmtQty } from '../../orderManagement/poUtils'
+import { createPortal } from 'react-dom'
+import { publicUrl, fmt$, fmtCurrency, fmtQty, fmtCbm } from '../../orderManagement/poUtils'
 import { supabase } from '../../../lib/supabase'
 import { useMemberId } from '../../../stores/profileStore'
 import { useShipmentContainerActions } from '../../../hooks/useShipmentContainerActions'
 import { useShipmentRecording } from '../../../hooks/useShipmentRecording'
+import FinalInspectionBadge from '../../orderManagement/FinalInspectionBadge'
 import InvoiceDetailsModal from './InvoiceDetailsModal'
 import ConfirmModal from '../../ui/ConfirmModal'
 
@@ -44,7 +46,7 @@ function DocFolder({ docs, uploadSlot, uploadInputRef }) {
     <div className="relative flex-shrink-0">
       <div
         className={`group relative transition-transform duration-200 ease-in cursor-pointer ${!open ? 'hover:-translate-y-1' : ''}`}
-        style={{ width: 24, height: 24, transform: open ? 'translateY(-3px)' : undefined }}
+        style={{ width: 18, height: 18, transform: open ? 'translateY(-3px)' : undefined }}
         onClick={() => setOpen(o => !o)}
         role="button"
         tabIndex={0}
@@ -54,7 +56,7 @@ function DocFolder({ docs, uploadSlot, uploadInputRef }) {
         title={open ? 'Hide documents' : summary}
       >
         <div className="relative w-full h-full" style={{ backgroundColor: folderBack, borderRadius: '2px 5px 5px 5px' }}>
-          <span className="absolute z-0 bottom-full left-0 w-2 h-[3px]" style={{ backgroundColor: folderBack, borderRadius: '2px 2px 0 0' }} />
+          <span className="absolute z-0 bottom-full left-0 w-1.5 h-[2px]" style={{ backgroundColor: folderBack, borderRadius: '2px 2px 0 0' }} />
           {docs.map((doc, i) => (
             <div
               key={doc.label}
@@ -86,7 +88,7 @@ function DocFolder({ docs, uploadSlot, uploadInputRef }) {
           {docs.map(doc => (
             <a key={doc.label} href={doc.url} target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0 text-gray-400">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0 text-gray-500">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
               </svg>
               <span className="truncate">{doc.label}</span>
@@ -97,9 +99,9 @@ function DocFolder({ docs, uploadSlot, uploadInputRef }) {
               <input ref={uploadInputRef} type="file" accept={uploadSlot.accept} className="hidden"
                 onChange={e => { if (e.target.files[0]) uploadSlot.onUpload(e.target.files[0]) }} />
               <button type="button" onClick={() => uploadInputRef.current.click()} disabled={uploadSlot.uploading}
-                className={`flex items-center gap-1 w-full px-2 py-1.5 text-[10px] font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors text-left
+                className={`flex items-center gap-1 w-full px-2 py-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors text-left
                   ${docs.length > 0 ? 'border-t border-gray-100' : ''}`}>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0 text-gray-400">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0 text-gray-500">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
                 <span className="truncate">{uploadSlot.uploading ? 'Uploading…' : uploadSlot.label}</span>
@@ -109,6 +111,82 @@ function DocFolder({ docs, uploadSlot, uploadInputRef }) {
         </div>
       )}
     </div>
+  )
+}
+
+// Manually-set shipment_invoices.status (see sql/shipment_invoice_manual_status.sql)
+// — same 5 values PendingWorkOverview.jsx's dropdown and InvoiceGroupsPane.jsx's
+// badge use, keyed here by the raw DB string directly (no 'group' alias —
+// this component has no legacy naming to stay compatible with). Editable
+// right from the container detail view since this is exactly where the
+// booking_pending -> do_carting_awaited -> booked progression actually
+// happens, not just from the separate cross-buyer overview screen.
+const INVOICE_STATUS_BADGE = {
+  not_raised:          { text: 'Not Raised', cls: 'bg-amber-100 text-amber-800' },
+  raised:              { text: 'Raised · Unbooked', cls: 'bg-blue-100 text-blue-800' },
+  booking_pending:     { text: 'Booking Pending', cls: 'bg-orange-100 text-orange-800' },
+  do_carting_awaited:  { text: 'DO Carting Awaited', cls: 'bg-purple-100 text-purple-800' },
+  booked:              { text: 'Booked', cls: 'bg-emerald-100 text-emerald-800' },
+}
+
+function InvoiceStatusBadge({ invoiceId, status, onUpdateStatus, onUpdated }) {
+  const [menu, setMenu] = useState(null) // { top, left } | null
+  const [updating, setUpdating] = useState(false)
+  const badge = INVOICE_STATUS_BADGE[status] ?? INVOICE_STATUS_BADGE.not_raised
+
+  const handlePick = async (key) => {
+    setMenu(null)
+    setUpdating(true)
+    try {
+      await onUpdateStatus(invoiceId, key)
+      onUpdated?.()
+    } catch (err) {
+      console.error('[InvoiceStatusBadge] update error:', err?.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={e => {
+          if (menu) { setMenu(null); return }
+          const rect = e.currentTarget.getBoundingClientRect()
+          setMenu({ top: rect.bottom + 4, left: rect.left })
+        }}
+        disabled={updating}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-wait flex-shrink-0 ${badge.cls}`}
+      >
+        {badge.text}
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {menu && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
+          <div
+            className="fixed z-50 w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden py-1"
+            style={{ top: menu.top, left: menu.left }}
+          >
+            {Object.entries(INVOICE_STATUS_BADGE).map(([key, opt]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handlePick(key)}
+                className={`w-full flex items-start gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-50 transition-colors ${key === status ? 'font-semibold text-gray-900' : 'text-gray-600'}`}
+              >
+                <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${opt.cls.split(' ').find(c => c.startsWith('bg-'))}`} />
+                <span className="leading-snug">{opt.text}</span>
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
   )
 }
 
@@ -143,7 +221,18 @@ function WizardLineItem({ li, qty, onChange }) {
   const ordered  = li.quantity_ordered ?? 0
   const shipped  = li.shipped_quantity ?? 0
   const balance  = li.balance_quantity ?? 0
+  const balanceValue = li.balance_value_usd ?? 0
   const pct      = ordered ? Math.min(100, Math.round((shipped / ordered) * 100)) : 0
+  // Recording a shipment (unlike planning one) is expected to be gated on
+  // Final inspection — but by actual accepted QUANTITY, not just "the latest
+  // round read Accepted": that verdict might belong to an earlier batch that
+  // doesn't cover the units about to ship now (see finalInspectionStatus.js).
+  // record_shipment_legs' own server-side check is the real, unbypassable
+  // enforcement; this is just the client-side reflection of it.
+  const shippableQty = li.finalInspectionShippableQty ?? 0
+  const inspectionOk = shippableQty > 0
+  const effectiveMax = Math.min(balance, shippableQty)
+  const cappedByInspection = inspectionOk && shippableQty < balance
 
   return (
     <div className="flex rounded-lg border border-gray-200 overflow-hidden bg-white">
@@ -153,10 +242,18 @@ function WizardLineItem({ li, qty, onChange }) {
         {/* Row 1: SKU · variant · badge · progress */}
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-gray-900 truncate">{li.buyer_sku_ref || '—'}</span>
-          {li.sku_variant && <span className="text-[11px] text-gray-600 truncate">{li.sku_variant}</span>}
+          {li.sku_variant && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 truncate max-w-[100px]"
+              style={{ backgroundColor: `${FOLDER_COLOR}14`, color: FOLDER_COLOR }}
+            >
+              {li.sku_variant}
+            </span>
+          )}
           <span className={`inline-block px-1.5 py-px rounded-full text-[9px] font-semibold whitespace-nowrap flex-shrink-0 ${badge}`}>
             {li.status || '—'}
           </span>
+          <FinalInspectionBadge report={li.finalInspection} />
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <div className="flex-1 h-1 bg-gray-300 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
@@ -166,9 +263,15 @@ function WizardLineItem({ li, qty, onChange }) {
         </div>
 
         {/* Row 2: balance info + qty input */}
-        {(() => {
+        {!inspectionOk ? (
+          <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+            {li.finalInspection?.cumulativeAccepted > 0
+              ? `Can't ship yet — all ${fmtQty(li.finalInspection.cumulativeAccepted)} Final-inspection-accepted units are already shipped.`
+              : "Can't ship yet — this SKU hasn't passed Final inspection."}
+          </p>
+        ) : (() => {
           const qtyNum = Number(qty)
-          const isOver = qty !== '' && qtyNum > balance
+          const isOver = qty !== '' && qtyNum > effectiveMax
           const isNeg  = qty !== '' && qtyNum < 0
           const hasErr = isOver || isNeg
           return (
@@ -176,11 +279,15 @@ function WizardLineItem({ li, qty, onChange }) {
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-gray-900 flex-shrink-0">
                   Balance: <span className="font-semibold text-gray-700">{fmtQty(balance)}</span>
+                  <span className="text-gray-500"> · {fmt$(balanceValue)}</span>
+                  {cappedByInspection && (
+                    <span className="text-amber-700"> · {fmtQty(shippableQty)} inspection-accepted</span>
+                  )}
                 </span>
                 <input
                   type="number"
                   min="1"
-                  max={balance}
+                  max={effectiveMax}
                   value={qty}
                   onChange={e => onChange(e.target.value)}
                   placeholder="Enter Qty to ship"
@@ -188,10 +295,16 @@ function WizardLineItem({ li, qty, onChange }) {
                     ${hasErr ? 'border-red-400 focus:border-red-500 bg-red-50' : 'border-gray-200 focus:border-gray-900'}`}
                 />
               </div>
-              {hasErr && (
+              {hasErr ? (
                 <p className="text-[10px] text-red-500 pl-0.5">
-                  {isNeg ? 'Quantity cannot be negative' : `Cannot exceed balance of ${fmtQty(balance)}`}
+                  {isNeg
+                    ? 'Quantity cannot be negative'
+                    : cappedByInspection && qtyNum > shippableQty
+                      ? `Cannot exceed Final-inspection-accepted quantity of ${fmtQty(shippableQty)}`
+                      : `Cannot exceed balance of ${fmtQty(balance)}`}
                 </p>
+              ) : qtyNum > 0 && (
+                <p className="text-[10px] text-gray-500 pl-0.5">= {fmt$(qtyNum * (li.unit_price ?? 0))}</p>
               )}
             </div>
           )
@@ -232,7 +345,7 @@ function BlDropzone({ file, onFile }) {
             <polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
           </svg>
           <span className="text-xs font-medium">Drop or click to upload Bill of Lading</span>
-          <span className="text-[10px] text-gray-500">PDF, DOC, image</span>
+          <span className="text-[10px] text-gray-600">PDF, DOC, image</span>
         </div>
       )}
     </>
@@ -241,7 +354,7 @@ function BlDropzone({ file, onFile }) {
 
 export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipmentRecorded, onInvoiceUpdated, onInvoiceDeleted, onPoRemoved }) {
   const memberId = useMemberId()
-  const { updateInvoice, reverseShipmentLeg, editShipmentLeg } = useShipmentContainerActions()
+  const { updateInvoice, updateInvoiceStatus, reverseShipmentLeg, editShipmentLeg } = useShipmentContainerActions()
   const pos = invoice.pos ?? []
 
   // Uploaded docs (BL doc, commercial invoice, packing list) — only the
@@ -276,10 +389,20 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
   // unbooked" list and can be attached elsewhere (or back here) later. This
   // used to be a full soft-delete of the invoice, which was wrong: it made
   // the invoice vanish everywhere, not just leave this container.
+  //
+  // status is reset here too — a deliberate, one-off side effect of this
+  // specific action, not the continuous auto-recomputation
+  // shipment_invoice_manual_status.sql moved away from. Without this, a
+  // 'booked'/'do_carting_awaited' label would keep showing everywhere
+  // (PendingWorkOverview, the Invoices tab) with no container behind it at
+  // all, since nothing else would ever prompt logistics to notice and fix it.
   const handleRemoveInvoice = async () => {
     setRemovingInvoice(true)
     try {
-      await updateInvoice(invoice.id, { container_id: null })
+      await updateInvoice(invoice.id, {
+        container_id: null,
+        status: invoice.invoice_raised_at ? 'raised' : 'not_raised',
+      })
       setShowRemoveModal(false)
       onInvoiceDeleted?.()
     } catch (err) {
@@ -359,10 +482,11 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
     legs, setLeg,
     blNumber, setBlNumber,
     cartons, setCartons,
+    shippedDate, setShippedDate,
     isBlStep, currentPo, existingBl,
     submitting, error,
     handleSubmit,
-    totalLegsEntered, hasBalanceError, poHasLegs, canSubmit,
+    totalLegsEntered, hasBalanceError, hasInspectionError, poHasLegs, canSubmit,
   } = useShipmentRecording(invoice, pos, onShipmentRecorded)
 
   // Filter for the current step's line-item list — resets whenever the
@@ -410,11 +534,10 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
     setSearchedExpandedPoId(expandedPoId)
     setPoLineItemSearch('')
   }
-
+//bg-[#DDEEFD]
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="rounded-xl bg-white shadow-sm"
-      style={{ border: `1px solid ${FOLDER_COLOR}33`, borderLeft: `3px solid ${FOLDER_COLOR}` }}>
+    <div className="rounded-xl bg-white pt-4 shadow-sm">
       {/* Header — always visible, toggle collapses non-recording expanded view.
           Top accent (not left) — left is already "selected" in the
           container/invoice-group sidebars on this same screen, a top stripe
@@ -425,7 +548,23 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
             that's actually data, incl. invoice # and date, moved into the
             labeled facts row below) + folder/edit/remove actions. */}
         <div className="flex items-start justify-between gap-3">
-          <span className="text-sm font-bold text-gray-900 truncate min-w-0">{invoice.primary_vendor_name || '—'}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-bold text-gray-900 truncate">{invoice.primary_vendor_name || '—'}</span>
+            {!recording && (
+              canManage ? (
+                <InvoiceStatusBadge
+                  invoiceId={invoice.id}
+                  status={invoice.status}
+                  onUpdateStatus={updateInvoiceStatus}
+                  onUpdated={onShipmentRecorded}
+                />
+              ) : (
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap flex-shrink-0 ${(INVOICE_STATUS_BADGE[invoice.status] ?? INVOICE_STATUS_BADGE.not_raised).cls}`}>
+                  {(INVOICE_STATUS_BADGE[invoice.status] ?? INVOICE_STATUS_BADGE.not_raised).text}
+                </span>
+              )
+            )}
+          </div>
           {!recording && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <DocFolder
@@ -441,7 +580,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
               {canManage && (
                 <>
                   <button type="button" onClick={() => setShowEditModal(true)}
-                    className="w-6 h-6 flex items-center justify-center cursor-pointer rounded hover:bg-gray-100 text-gray-600 hover:text-black transition-colors" title="Edit invoice">
+                    className="w-6 h-6 flex items-center justify-center cursor-pointer rounded hover:bg-gray-100 text-gray-700 hover:text-black transition-colors" title="Edit invoice">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -450,7 +589,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                   {/* Remove only shown when no legs and no BL number recorded */}
                   {canRemoveFromContainer && (
                     <button type="button" onClick={() => setShowRemoveModal(true)}
-                      className="w-6 h-6 flex items-center justify-center cursor-pointer rounded hover:bg-amber-50 text-gray-600 hover:text-amber-600 transition-colors" title="Remove from container">
+                      className="w-6 h-6 flex items-center justify-center cursor-pointer rounded hover:bg-amber-50 text-gray-700 hover:text-amber-600 transition-colors" title="Remove from container">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                         <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
@@ -467,41 +606,41 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
             unlabeled inline text in the title row — this app and its
             workflow are new to most users, so every field should say what
             it is rather than assuming it's obvious from position alone. */}
-        <div className="flex items-start gap-4 flex-wrap">
+        <div className="flex items-start gap-7 flex-wrap">
           {invoice.invoice_number && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Invoice</div>
-              <div className="text-[11px] font-semibold text-gray-800">{invoice.invoice_number}</div>
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Invoice</div>
+              <div className="text-sm font-bold text-gray-900">{invoice.invoice_number}</div>
             </div>
           )}
           {invoice.invoice_date && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Date</div>
-              <div className="text-[11px] font-semibold text-gray-800">{invoice.invoice_date}</div>
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Date</div>
+              <div className="text-sm font-bold text-gray-900">{invoice.invoice_date}</div>
             </div>
           )}
           {invoice.invoice_value != null && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Value</div>
-              <div className="text-[11px] font-semibold text-gray-800">{fmt$(invoice.invoice_value)}</div>
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Value</div>
+              <div className="text-sm font-bold text-gray-900">{fmtCurrency(invoice.invoice_value, invoice.invoice_currency)}</div>
             </div>
           )}
           {invoice.cbm != null && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">CBM</div>
-              <div className="text-[11px] font-semibold text-gray-800">{invoice.cbm}</div>
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">CBM</div>
+              <div className="text-sm font-bold text-gray-900">{fmtCbm(invoice.cbm)}</div>
             </div>
           )}
           {invoice.payment_status && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Status</div>
-              <div className="text-[11px] font-semibold text-gray-800">{invoice.payment_status}</div>
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Status</div>
+              <div className="text-sm font-bold text-gray-900">{invoice.payment_status}</div>
             </div>
           )}
           {invoice.payment_term && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Term</div>
-              <div className="text-[11px] font-semibold text-gray-800">{invoice.payment_term}</div>
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Term</div>
+              <div className="text-sm font-bold text-gray-900">{invoice.payment_term}</div>
             </div>
           )}
           {/* BL # folded in as a plain labeled fact like the others — it used
@@ -509,8 +648,8 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
               different kind of thing instead of just another field. */}
           {!recording && invoice.bl_number && (
             <div>
-              <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">BL No.</div>
-              <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+              <div className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">BL No.</div>
+              <div className="flex items-center gap-1 text-sm font-bold text-emerald-700">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
@@ -525,7 +664,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
       <ConfirmModal
         open={showRemoveModal}
         title="Remove from container?"
-        message={`This will unbook invoice ${invoice.invoice_number || ''} from this container. The invoice itself, its BL, and its PO composition are unaffected — it goes back to the raised, unbooked list and can be attached elsewhere (or back here) later.`}
+        message={`This will unbook invoice ${invoice.invoice_number || ''} from this container. The invoice itself, its BL, and its PO composition are unaffected — it goes back to the raised, unbooked list and can be attached elsewhere (or back here) later. Its status also resets to ${invoice.invoice_raised_at ? 'Raised' : 'Not Raised'} since it's no longer booked.`}
         onConfirm={handleRemoveInvoice}
         onClose={() => setShowRemoveModal(false)}
         loading={removingInvoice}
@@ -587,7 +726,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-colors
                   ${expandedPoId === po.id
                     ? 'bg-gray-900 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
               >
                 {po.po_number}
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
@@ -600,7 +739,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
               <button type="button" onClick={startRecording}
                 className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg cursor-pointer text-[11px] font-semibold transition-colors ml-auto
                   ${invoice.bl_number
-                    ? 'border border-gray-300 text-gray-600 hover:border-gray-500 hover:text-gray-900'
+                    ? 'border border-gray-300 text-gray-700 hover:border-gray-500 hover:text-gray-900'
                     : 'bg-black text-white hover:bg-neutral-800'}`}
               >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -610,7 +749,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
               </button>
             )}
             {!invoice.bl_number && !canManage && (
-              <span className="text-[11px] text-gray-500 ml-auto">No BL recorded</span>
+              <span className="text-[11px] text-gray-600 ml-auto">No BL recorded</span>
             )}
           </div>
 
@@ -626,9 +765,9 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                   li.sku_variant?.toLowerCase().includes(term))
               : allLineItems
             return (
-              <div className="space-y-2 pt-1">
+              <div className="mt-1 space-y-2">
                 {allLineItems.length >= 6 && (
-                  <div className="relative max-w-[200px]">
+                  <div className="relative max-w-[340px]">
                     <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-600 pointer-events-none"
                       viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -643,11 +782,12 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                   </div>
                 )}
                 {allLineItems.length === 0 ? (
-                  <p className="text-[11px] text-gray-500">No line items on this PO</p>
+                  <p className="text-[11px] text-gray-600">No line items on this PO</p>
                 ) : lineItems.length === 0 ? (
-                  <p className="text-[11px] text-gray-500">No line items match "{poLineItemSearch}"</p>
+                  <p className="text-[11px] text-gray-600">No line items match "{poLineItemSearch}"</p>
                 ) : (
-                  lineItems.map(li => {
+                  <div className="bg-white rounded-b-xl -mx-4 -mb-3 px-4 py-3 space-y-4">
+                  {lineItems.map(li => {
                     const invoiceQty   = invoice.legsByLineItem?.[li.id] ?? 0
                     const invoiceValue = invoiceQty * (li.unit_price ?? 0)
                     const allLegs      = invoice.legRowsByLineItem?.[li.id] ?? []
@@ -656,18 +796,18 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                     const reversalsOpen = !!expandedReversals[li.id]
                     const renderLeg = leg => (
                       <div key={leg.id}
-                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] ${leg.reversed ? 'bg-red-50/70' : 'bg-gray-50'}`}>
-                        <div className={`min-w-0 ${leg.reversed ? 'text-red-300' : 'text-gray-600'}`}>
+                        className={`flex items-center justify-between gap-2 -mx-2.5 px-2.5 py-1.5 text-[11px] ${leg.reversed ? 'bg-red-50/70' : 'bg-indigo-50'}`}>
+                        <div className={`min-w-0 ${leg.reversed ? 'text-red-500' : 'text-black'}`}>
                           <div className={leg.reversed ? 'line-through' : ''}>
-                            <span className="font-semibold">{fmtQty(leg.shipped_quantity)} qty</span>
+                            <span className="font-bold">{fmtQty(leg.shipped_quantity)} qty</span>
                             {' · '}{leg.shipped_date ? new Date(leg.shipped_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
                             {leg.submitted_by && ` · ${leg.submitted_by}`}
                           </div>
                           {leg.reversed && leg.reversed_reason && (
-                            <div className="text-[10px] text-red-400 mt-0.5">Reason: {leg.reversed_reason}</div>
+                            <div className="text-[10px] text-red-600 mt-0.5">Reason: {leg.reversed_reason}</div>
                           )}
                           {!leg.reversed && leg.edit_count > 0 && (
-                            <div className="text-[10px] text-gray-500 mt-0.5" title={leg.last_edit_reason ? `Latest reason: ${leg.last_edit_reason}` : undefined}>
+                            <div className="text-[10px] text-gray-700 mt-0.5" title={leg.last_edit_reason ? `Latest reason: ${leg.last_edit_reason}` : undefined}>
                               Edited {leg.edit_count > 1 ? `${leg.edit_count}×` : ''} · {leg.last_edit_reason}
                             </div>
                           )}
@@ -677,7 +817,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                         ) : canManage ? (
                           <div className="flex-shrink-0 flex items-center gap-1">
                             <button type="button" onClick={() => openEditModal(leg)} disabled={editingLegId === leg.id}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 border border-gray-200 text-gray-600 text-[10px] font-bold hover:bg-gray-200 hover:border-gray-300 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-700 text-white text-[10px] font-bold hover:bg-gray-800 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -685,7 +825,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                               Edit
                             </button>
                             <button type="button" onClick={() => openReverseModal(leg.id)} disabled={reversingLegId === leg.id}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-600 text-[10px] font-bold hover:bg-red-100 hover:border-red-300 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-red-600 text-white text-[10px] font-bold hover:bg-red-700 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                 <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
                               </svg>
@@ -696,20 +836,32 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                       </div>
                     )
                     return (
-                      <div key={li.id} className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-900 truncate flex-1">
+                      // One flat background for the whole item, not a stack
+                      // of differently-colored zones — that read as more
+                      // bands than boundaries. Meaning now lives in text
+                      // color/weight (emerald for shipped) instead of a
+                      // fill, so items separate from each other by being
+                      // one calm card, not from their own internal sections.
+                      <div key={li.id} className=" border-t-2 border-neutral-200 px-2.5 py-2 space-y-2">
+                        <div className="flex  items-center gap-2">
+                          <span className="text-xs font-bold text-gray-900 truncate">
                             {li.buyer_sku_ref}
-                            {li.sku_variant && (
-                              <span className="text-gray-600 font-normal ml-1">· {li.sku_variant}</span>
-                            )}
                           </span>
+                          {li.sku_variant && (
+                            <span
+                              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 truncate max-w-[120px]"
+                              style={{ backgroundColor: `${FOLDER_COLOR}14`, color: FOLDER_COLOR }}
+                            >
+                              {li.sku_variant}
+                            </span>
+                          )}
+                          <span className="flex-1" />
                           {activePo.actual_vendor_name && activePo.actual_vendor_name !== invoice.primary_vendor_name && (
-                            <span className="text-[10px] text-gray-600 flex-shrink-0 italic">{activePo.actual_vendor_name}</span>
+                            <span className="text-[10px] text-gray-700 flex-shrink-0 italic">{activePo.actual_vendor_name}</span>
                           )}
                         </div>
-                        <div className="flex items-center justify-between px-2.5 py-1.5 bg-gray-50 rounded-lg">
-                          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Ordered</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wide">Ordered</span>
                           <span className="text-xs font-semibold text-gray-900">
                             {fmtQty(li.quantity_ordered)} qty · {fmt$(li.order_value_usd)}
                           </span>
@@ -718,22 +870,22 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                         {/* Shipment Legs — header carries this invoice's shipped
                             total (used to be a separate "This Invoice" card;
                             merged in since it's just the sum of the legs below). */}
-                        <div className={`rounded-lg overflow-hidden ${invoiceQty > 0 ? 'bg-emerald-50/60' : 'bg-gray-50'}`}>
-                          <div className="flex items-center justify-between px-2.5 py-1.5">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Shipped this invoice</span>
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-extrabold text-emerald-600 uppercase tracking-wide">Shipped this invoice</span>
                             {invoiceQty > 0 ? (
-                              <span className="text-xs font-semibold text-emerald-800">{fmtQty(invoiceQty)} qty · {fmt$(invoiceValue)}</span>
+                              <span className="text-xs font-semibold text-emerald-700">{fmtQty(invoiceQty)} qty · {fmt$(invoiceValue)}</span>
                             ) : (
-                              <span className="text-[10px] text-gray-600 italic">Not shipped</span>
+                              <span className="text-[10px] text-gray-500 italic">Not shipped</span>
                             )}
                           </div>
                           {(activeLegs.length > 0 || reversedLegs.length > 0) && (
-                          <div className="px-2 pb-2 space-y-1">
+                          <div className="pt-1.5 space-y-1">
                             {activeLegs.map(renderLeg)}
                             {reversedLegs.length > 0 && (
                               <>
                                 <button type="button" onClick={() => toggleReversals(li.id)}
-                                  className="flex items-center gap-1 text-[10px] font-semibold text-gray-600 hover:text-gray-800 cursor-pointer transition-colors pt-0.5">
+                                  className="flex items-center gap-1 text-[10px] font-semibold text-gray-700 hover:text-gray-900 cursor-pointer transition-colors pt-0.5">
                                   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                                     className={`transition-transform ${reversalsOpen ? 'rotate-180' : ''}`}>
                                     <polyline points="6 9 12 15 18 9" />
@@ -748,7 +900,8 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                         </div>
                       </div>
                     )
-                  })
+                  })}
+                  </div>
                 )}
               </div>
             )
@@ -785,8 +938,8 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                       : hasLegs
                         ? 'bg-emerald-100 text-emerald-800'
                         : isVisited
-                          ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                          ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                 >
                   {hasLegs && !isActive && <span className="mr-0.5">✓</span>}PO {po.po_number}
                 </button>
@@ -800,7 +953,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                   ? 'bg-gray-900 text-white'
                   : (blNumber.trim() || existingBl)
                     ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
               {(blNumber.trim() || existingBl) && !isBlStep && <span className="mr-0.5">✓</span>}BL Number
             </button>
@@ -819,11 +972,11 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
             return (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                  <div className="text-[10px] font-bold text-gray-600 uppercase tracking-wide">
                     {currentPo.actual_vendor_name || 'Vendor'} · {currentPo.po_number}
                   </div>
                   {allLineItems.length > 6 && (
-                    <div className="relative flex-1 max-w-[160px]">
+                    <div className="relative flex-1 max-w-[260px]">
                       <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-600 pointer-events-none"
                         viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -839,9 +992,9 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                   )}
                 </div>
                 {allLineItems.length === 0 ? (
-                  <p className="text-xs text-gray-500">No line items on this PO</p>
+                  <p className="text-xs text-gray-600">No line items on this PO</p>
                 ) : lineItems.length === 0 ? (
-                  <p className="text-xs text-gray-500">No line items match "{lineItemSearch}"</p>
+                  <p className="text-xs text-gray-600">No line items match "{lineItemSearch}"</p>
                 ) : (
                   lineItems.map(li => (
                     <WizardLineItem
@@ -858,30 +1011,29 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
 
           {isBlStep && (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2">
-                {/* BL Number — wider */}
-                <div className="col-span-2">
-                  <label className="block text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-1">
-                    BL Number <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={blNumber}
-                    onChange={e => setBlNumber(e.target.value)}
-                    placeholder="e.g. MSCUAB123456"
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-gray-900 placeholder:text-gray-400"
-                    autoFocus
-                  />
-                  {existingBl && existingBl !== blNumber && (
-                    <p className="text-[10px] text-amber-600 mt-1">This will update the existing BL number ({existingBl}).</p>
-                  )}
-                  {existingBl && existingBl === blNumber && (
-                    <p className="text-[10px] text-emerald-600 mt-1">BL number already recorded — adding more legs.</p>
-                  )}
-                </div>
+              <div>
+                <label className="block text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-1">
+                  BL Number <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={blNumber}
+                  onChange={e => setBlNumber(e.target.value)}
+                  placeholder="e.g. MSCUAB123456"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-gray-900 placeholder:text-gray-400"
+                  autoFocus
+                />
+                {existingBl && existingBl !== blNumber && (
+                  <p className="text-[10px] text-amber-600 mt-1">This will update the existing BL number ({existingBl}).</p>
+                )}
+                {existingBl && existingBl === blNumber && (
+                  <p className="text-[10px] text-emerald-600 mt-1">BL number already recorded — adding more legs.</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 {/* No. of Cartons */}
                 <div>
-                  <label className="block text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-1">
+                  <label className="block text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-1">
                     No. of Cartons
                   </label>
                   <input
@@ -893,10 +1045,68 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-gray-900 placeholder:text-gray-400"
                   />
                 </div>
+                {/* Shipped Date — defaults to today, editable for late entry */}
+                <div>
+                  <label className="block text-[9px] font-bold text-gray-600 uppercase tracking-widest mb-1">
+                    Shipped Date <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={shippedDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setShippedDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-gray-900"
+                  />
+                </div>
               </div>
-              {totalLegsEntered === 0 && (
+              {totalLegsEntered === 0 ? (
                 <p className="text-[10px] text-amber-600">No leg quantities entered — fill in at least one PO step before submitting.</p>
-              )}
+              ) : (() => {
+                // Recap of everything about to be submitted — entered across
+                // separate PO tabs, easy to lose track of before hitting
+                // Submit without a final look at the total.
+                let totalQty = 0, totalValue = 0
+                const poRecaps = pos.map(po => {
+                  const lines = (po.po_line_items ?? [])
+                    .filter(li => Number(legs[li.id]) > 0)
+                    .map(li => {
+                      const q = Number(legs[li.id])
+                      const v = q * (li.unit_price ?? 0)
+                      totalQty += q
+                      totalValue += v
+                      return { li, q, v }
+                    })
+                  return { po, lines }
+                }).filter(({ lines }) => lines.length > 0)
+
+                return (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                    <div className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">Shipping Summary</div>
+                    <div className="space-y-2">
+                      {poRecaps.map(({ po, lines }) => (
+                        <div key={po.id}>
+                          <div className="text-[10px] font-bold text-gray-700 font-mono">{po.po_number}</div>
+                          <div className="space-y-0.5 mt-0.5">
+                            {lines.map(({ li, q, v }) => (
+                              <div key={li.id} className="flex items-center justify-between gap-2 text-[11px] pl-2">
+                                <span className="min-w-0 flex-1 truncate text-gray-700">
+                                  {li.buyer_sku_ref || '—'}
+                                  {li.sku_variant && <span className="ml-1 text-gray-500">{li.sku_variant}</span>}
+                                </span>
+                                <span className="flex-shrink-0 font-semibold text-gray-900">{fmtQty(q)} qty · {fmt$(v)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-200 text-xs font-bold text-gray-900">
+                      <span>Total</span>
+                      <span>{fmtQty(totalQty)} qty · {fmt$(totalValue)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           )}
 
@@ -911,7 +1121,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
               </button>
             ) : (
               <button type="button" onClick={() => setStep(s => s - 1)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:border-gray-400 hover:text-gray-900 cursor-pointer transition-colors">
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 cursor-pointer transition-colors">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polyline points="15 18 9 12 15 6" />
                 </svg>
@@ -921,7 +1131,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
 
             {!isBlStep ? (
               <button type="button" onClick={() => setStep(s => s + 1)}
-                disabled={hasBalanceError}
+                disabled={hasBalanceError || hasInspectionError}
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-900 text-xs font-semibold text-gray-900 hover:bg-gray-900 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors">
                 Next
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -930,7 +1140,7 @@ export default function InvoiceCard({ invoice, canManage, buyerOrgId, onShipment
               </button>
             ) : (
               <button type="button" onClick={handleSubmit}
-                disabled={!canSubmit || totalLegsEntered === 0}
+                disabled={!canSubmit || totalLegsEntered === 0 || hasInspectionError}
                 className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gray-900 text-xs font-semibold text-white hover:bg-gray-700 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors">
                 {submitting && (
                   <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

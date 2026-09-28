@@ -6,11 +6,15 @@ export default function CategorySelect({ categoryLevels, categorySelections, cat
   )
 
   return (
-    <div className="flex gap-1.5">
+    // flex-wrap — cascading category/subcategory/sub-subcategory/... can run 4+ levels deep;
+    // without wrapping, each level's min-w-[120px] select just kept extending the row
+    // horizontally off the edge of the modal on narrow (mobile) screens, with nothing to
+    // scroll it back into view. Wrapping drops the 4th+ level onto its own line instead.
+    <div className="flex flex-wrap gap-1.5">
       {categoryLevels.map((options, levelIndex) => (
         <select
           key={levelIndex}
-          className={SELECT_CLS + ' flex-1 min-w-0'}
+          className={SELECT_CLS}
           value={categorySelections[levelIndex]?.id || ''}
           onChange={e => {
             const opt = options.find(o => String(o.id) === e.target.value)

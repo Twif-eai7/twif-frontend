@@ -1,11 +1,30 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { useMemberId, useRole } from '../stores/profileStore'
-import { usePlmStore } from '../stores/plmStore'
+import { useMemberId, useRole, useOrgDepartment } from '../stores/profileStore'
+import { usePlmStore, mapComment } from '../stores/plmStore'
+import { discoverWorkspaces, fetchFilteredComments, fetchInChunks } from './plmWorkspaceDiscovery'
+import { attachmentPreview } from '../utils/plmAttachments'
+
+// Small-scale name lookup (at most a handful of distinct authors across the Dock's top-5
+// unread workspaces) — same fallback chain as the Activity Log's resolveAuthorNames.
+async function resolveAuthorNames(authorIds) {
+  if (!authorIds.length) return {}
+  const mRows = await fetchInChunks('organization_members', 'id, full_name, user_id', 'id', authorIds)
+  const nullIds = mRows.filter(m => !m.full_name).map(m => m.user_id).filter(Boolean)
+  const uRows = await fetchInChunks('portal_users', 'id, email', 'id', nullIds)
+  const emailMap = Object.fromEntries(uRows.map(u => [u.id, u.email]))
+  const nameMap = {}
+  mRows.forEach(m => { nameMap[m.id] = m.full_name || emailMap[m.user_id] || null })
+  return nameMap
+}
 
 export function useRecentWorkspaces() {
   const memberId          = useMemberId()
-  const role              = (useRole() || 'buyer').toLowerCase()
+  const orgRole           = (useRole() || 'buyer').toLowerCase()
+  const orgDepartment     = useOrgDepartment()
+  // Same department override as usePLMCatalog.js/WorkspaceModal.jsx — a QA-dept merchant
+  // member must never fall into the 'merchant' org-wide discovery branch.
+  const role              = (orgRole === 'merchant' && orgDepartment === 'qa') ? 'qa' : orgRole
   const activeWorkspaceId = usePlmStore(s => s.activeWorkspaceId)
   const activeWsRef       = useRef(activeWorkspaceId)
   const [unread, setUnread] = useState([])
@@ -16,65 +35,15 @@ export function useRecentWorkspaces() {
     if (!memberId) { setUnread([]); return }
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    let wsRows = []
-    let skuMap = {}
-    let uploadMap = {}
 
-    // ── Merchant: discover workspaces via catalog uploads + peer pairs ──────────
-    if (role === 'merchant') {
-      const [{ data: pairRows }, { data: lastSeen }] = await Promise.all([
-        supabase.from('merchant_access_pairs')
-          .select('grantor_member_id')
-          .eq('grantee_member_id', memberId),
-        supabase.from('workspace_last_seen')
-          .select('workspace_id, seen_at')
-          .eq('member_id', memberId),
-      ])
-
-      const creatorIds = [memberId, ...(pairRows || []).map(r => r.grantor_member_id)]
-
-      const { data: uploads } = await supabase
-        .from('npd2_catalog_uploads')
-        .select('id, supplier')
-        .in('created_by_member_id', creatorIds)
-
-      const uploadIds = (uploads || []).map(u => u.id)
-      uploadMap = Object.fromEntries((uploads || []).map(u => [u.id, u]))
-      if (!uploadIds.length) { setUnread([]); return }
-
-      const { data: skuRows_ } = await supabase
-        .from('npd2_catalog_skus')
-        .select('id, auto_code, catalog_upload_id')
-        .in('catalog_upload_id', uploadIds)
-        .eq('is_archived', false)
-        .is('delete_meta', null)
-
-      skuMap = Object.fromEntries((skuRows_ || []).map(s => [s.id, s]))
-      const skuIds = (skuRows_ || []).map(s => s.id)
-      if (!skuIds.length) { setUnread([]); return }
-
-      const { data: ws } = await supabase
-        .from('npd2_workspaces')
-        .select('id, buyer_ref, catalog_sku_id')
-        .in('catalog_sku_id', skuIds)
-      wsRows = ws || []
-
-      const seenMap = Object.fromEntries((lastSeen || []).map(r => [r.workspace_id, r.seen_at]))
-      return buildUnread({ wsRows, skuMap, uploadMap, seenMap, memberId, thirtyDaysAgo, activeWsRef, setUnread })
-    }
-
-    // ── Buyer: workspaces they are directly linked to ───────────────────────────
-    // ── Supplier: workspaces they are directly linked to ────────────────────────
-    const field = role === 'buyer' ? 'buyer_member_id' : 'supplier_member_id'
-    const [{ data: ws }, { data: lastSeen }] = await Promise.all([
-      supabase.from('npd2_workspaces')
-        .select('id, buyer_ref, catalog_sku_id')
-        .eq(field, memberId),
+    const [{ wsRows, skuMap, uploadMap }, { data: lastSeen }] = await Promise.all([
+      discoverWorkspaces({ memberId, role }),
       supabase.from('workspace_last_seen')
         .select('workspace_id, seen_at')
         .eq('member_id', memberId),
     ])
-    wsRows = ws || []
+    if (!wsRows.length) { setUnread([]); return }
+
     const seenMap = Object.fromEntries((lastSeen || []).map(r => [r.workspace_id, r.seen_at]))
     return buildUnread({ wsRows, skuMap, uploadMap, seenMap, memberId, thirtyDaysAgo, activeWsRef, setUnread })
   }, [memberId, role])
@@ -121,37 +90,50 @@ async function buildUnread({ wsRows, skuMap, uploadMap, seenMap, memberId, thirt
   const wsIds = wsRows.map(w => w.id)
   if (!wsIds.length) { setUnread([]); return }
 
-  const { data: comments } = await supabase
-    .from('npd2_comments')
-    .select('workspace_id, created_at')
-    .in('workspace_id', wsIds)
-    .gte('created_at', thirtyDaysAgo)
-    .neq('author_member_id', memberId)
-    .order('created_at', { ascending: false })
+  // Server-side filtered by channel/role/group-membership — a buyer's Dock badge no longer
+  // pops up for a vendor-channel (or non-member group-channel) message.
+  const allComments = await fetchFilteredComments(wsIds)
+  const comments = allComments
+    .filter(c => c.created_at >= thirtyDaysAgo && c.author_member_id !== memberId)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
   const wsMap = Object.fromEntries(wsRows.map(w => [w.id, w]))
+  // First (most recent, since `comments` is sorted newest-first) qualifying comment per
+  // workspace is the "latest" shown in the hover preview; unreadCount tallies every
+  // qualifying comment after last-seen, same "unseen since" rule the Activity Log uses.
   const latestByWs = {}
-  for (const c of (comments || [])) {
-    if (!latestByWs[c.workspace_id]) latestByWs[c.workspace_id] = c.created_at
+  const countByWs   = {}
+  for (const c of comments) {
+    const seen = seenMap[c.workspace_id]
+    if (seen && c.created_at <= seen) continue
+    if (!latestByWs[c.workspace_id]) latestByWs[c.workspace_id] = c
+    countByWs[c.workspace_id] = (countByWs[c.workspace_id] || 0) + 1
   }
 
+  const topEntries = Object.entries(latestByWs)
+    .filter(([wsId]) => wsId !== activeWsRef.current)
+    .slice(0, 5)
+
+  const nameMap = await resolveAuthorNames([...new Set(topEntries.map(([, row]) => row.author_member_id).filter(Boolean))])
+
   setUnread(
-    Object.entries(latestByWs)
-      .filter(([wsId, latest]) => {
-        if (wsId === activeWsRef.current) return false
-        const seen = seenMap[wsId]
-        return !seen || latest > seen
-      })
-      .map(([wsId]) => {
-        const ws       = wsMap[wsId]
-        const sku      = skuMap[ws?.catalog_sku_id]
-        const supplier = uploadMap[sku?.catalog_upload_id]?.supplier || null
-        return {
-          workspaceId: wsId,
-          label:    ws?.buyer_ref || sku?.auto_code || 'Workspace',
-          supplier,
-        }
-      })
-      .slice(0, 5)
+    topEntries.map(([wsId, latestRow]) => {
+      const ws       = wsMap[wsId]
+      const sku      = skuMap[ws?.catalog_sku_id]
+      const supplier = uploadMap[sku?.catalog_upload_id]?.supplier || null
+      const latest   = mapComment(latestRow)
+      // latest.body is raw HTML for rich-text ("Notes") comments — run it through the shared
+      // preview so the Dock shows readable text, not "<div>…&nbsp;</div>".
+      const preview  = attachmentPreview(latest)
+      return {
+        workspaceId:     wsId,
+        label:           ws?.buyer_ref || sku?.auto_code || 'Workspace',
+        skuCode:         sku?.auto_code || null,
+        supplier,
+        unreadCount:     countByWs[wsId] || 0,
+        lastMessage:     preview.text || latest.body || null,
+        lastAuthorName:  nameMap[latestRow.author_member_id] || null,
+      }
+    })
   )
 }

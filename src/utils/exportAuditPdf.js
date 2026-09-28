@@ -131,7 +131,7 @@ export async function exportAuditPdf(audit, { logoUrl } = {}) {
 
   // Helper: draw label (handles wrapping), returns line count
   function lbl(label) {
-    doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(150, 150, 150)
+    doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(80, 80, 80)
     const lines = doc.splitTextToSize(label.toUpperCase(), LCW - 2)
     doc.text(lines, M, y + 4.6)
     return lines.length

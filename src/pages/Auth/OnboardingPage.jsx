@@ -14,7 +14,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
 import { formatErrorFor, GSTIN_RE } from '../../utils/fieldFormats'
 import ApplicationPreviewModal from './ApplicationPreviewModal'
-import { sendAuthOtp, verifyEmailOtp } from '../../lib/authOtp'
+import { sendAuthOtp, verifyEmailOtp, OTP_LENGTH } from '../../lib/authOtp'
 
 // ─── Constants ────────────────────────────────────────────────
 const COUNTRIES = ['India', 'Sri Lanka']
@@ -1157,7 +1157,6 @@ function clearDraft() {
 }
 
 // ─── Main OnboardingPage ───────────────────────────────────────
-const OTP_LENGTH = 8
 
 function PublicOtpGate({ email, onVerified, onCancel, verifying, error }) {
   const { secondsLeft, canResend, resending, resendError, resend } = useOTPTimer(email, 'signup', '/register/vendor')
@@ -1169,7 +1168,7 @@ function PublicOtpGate({ email, onVerified, onCancel, verifying, error }) {
           Verify email
         </h2>
         <p className="text-center text-sm text-stone-500 leading-relaxed mb-4">
-          We sent an {OTP_LENGTH}-digit code to{' '}
+          We sent a {OTP_LENGTH}-digit code to{' '}
           <strong className="text-stone-900 font-medium">{email}</strong>
         </p>
         {(error || resendError) && <Alert type="error">{error || resendError}</Alert>}

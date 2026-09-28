@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { useAlerts, getCategory, resolvePO, hasUpdates, formatTime, formatChanges } from '../../hooks/useAlerts'
+import { useAlerts, getCategory, resolvePO, hasUpdates, isExceptionRequest, formatTime, formatChanges } from '../../hooks/useAlerts'
 import { usePoStore, EMPTY_FILTERS } from '../../stores/poStore'
 
 // ── Nav config ────────────────────────────────────────────────────────────────
@@ -24,6 +25,13 @@ const ADMIN_NAV = [
   { type: 'filter', filter: 'pi_reminder',  label: 'Reminders',    countKey: 'piReminder',  dot: '#ca8a04' },
   { type: 'section', label: 'Inspections' },
   { type: 'filter', filter: 'inspection',   label: 'All Inspections', countKey: 'inspection', dot: '#2563eb' },
+  { type: 'section', label: 'Product Sheets' },
+  { type: 'filter', filter: 'product_sheet', label: 'Product Sheets', countKey: 'product_sheet', dot: '#0d9488' },
+  { type: 'filter', filter: 'pi_sheet', label: 'PI Line Items', countKey: 'pi_sheet', dot: '#7c3aed' },
+  { type: 'section', label: 'Exception Requests' },
+  { type: 'filter', filter: 'exception_all',  label: 'All Requests', countKey: 'exceptionAll' },
+  { type: 'filter', filter: 'exception_date', label: 'Date Change',  countKey: 'exceptionDate', dot: '#7c3aed' },
+  { type: 'filter', filter: 'exception_qty',  label: 'Cancellation', countKey: 'exceptionQty',  dot: '#dc2626' },
 ]
 
 const NON_ADMIN_NAV = [
@@ -35,6 +43,12 @@ const NON_ADMIN_NAV = [
   { type: 'filter', filter: 'overdue',  label: 'Overdues',      countKey: 'overdue',  dot: '#dc2626' },
   { type: 'filter', filter: 'delay',       label: 'Delay Reasons', countKey: 'delay',      dot: '#7c3aed' },
   { type: 'filter', filter: 'inspection',  label: 'Inspections',   countKey: 'inspection', dot: '#2563eb' },
+  { type: 'filter', filter: 'product_sheet', label: 'Product Sheets', countKey: 'product_sheet', dot: '#0d9488' },
+  { type: 'filter', filter: 'pi_sheet', label: 'PI Line Items', countKey: 'pi_sheet', dot: '#7c3aed' },
+  { type: 'section', label: 'Exception Requests' },
+  { type: 'filter', filter: 'exception_all',  label: 'All Requests', countKey: 'exceptionAll' },
+  { type: 'filter', filter: 'exception_date', label: 'Date Change',  countKey: 'exceptionDate', dot: '#7c3aed' },
+  { type: 'filter', filter: 'exception_qty',  label: 'Cancellation', countKey: 'exceptionQty',  dot: '#dc2626' },
 ]
 
 // ── Category styles ───────────────────────────────────────────────────────────
@@ -49,12 +63,18 @@ const CAT_STYLE = {
   revision:   { icon: '#0891b2', border: '#0891b2', tagBg: '#cffafe', tagText: '#164e63', tagBorder: '#a5f3fc' },
   inspection: { icon: '#2563eb', border: '#2563eb', tagBg: '#dbeafe', tagText: '#1e40af', tagBorder: '#bfdbfe' },
   po:         { icon: '#0f172a', border: null,      tagBg: '#f1f5f9', tagText: '#475569', tagBorder: '#e2e8f0' },
+  product_sheet: { icon: '#0d9488', border: '#0d9488', tagBg: '#ccfbf1', tagText: '#115e59', tagBorder: '#99f6e4' },
+  pi_sheet:   { icon: '#7c3aed', border: '#7c3aed', tagBg: '#ede9fe', tagText: '#5b21b6', tagBorder: '#ddd6fe' },
+  otif_exception: { icon: '#7c3aed', border: '#7c3aed', tagBg: '#ede9fe', tagText: '#5b21b6', tagBorder: '#ddd6fe' },
+  cancellation:   { icon: '#dc2626', border: '#dc2626', tagBg: '#fee2e2', tagText: '#991b1b', tagBorder: '#fecaca' },
 }
 
 const TAG_LABELS = {
   confirmed: 'PI Confirmed', overdue: 'Overdue', delay: 'PI Delay',
   inspection: 'Inspection',  reminder: 'Reminder', revision: 'PO Revision',
   deleted: 'Deleted', updated: 'Updated', po: 'PO Upload',
+  product_sheet: 'Product Sheet', pi_sheet: 'PI Line Items',
+  otif_exception: 'OTIF Exception', cancellation: 'Qty Cancellation',
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -68,10 +88,14 @@ function IconPath({ cat }) {
   if (cat === 'deleted')    return <><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></>
   if (cat === 'revision')   return <><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></>
   if (cat === 'inspection') return <><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>
+  if (cat === 'product_sheet') return <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></>
+  if (cat === 'pi_sheet') return <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></>
+  if (cat === 'otif_exception') return <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>
+  if (cat === 'cancellation') return <><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></>
   return <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>
 }
 
-function AlertItem({ alert, markAsRead, onInspectionClick }) {
+function AlertItem({ alert, markAsRead, onInspectionClick, onGoToBatch, onExceptionClick }) {
   const [changesOpen, setChangesOpen] = useState(false)
 
   const cat       = getCategory(alert)
@@ -80,6 +104,7 @@ function AlertItem({ alert, markAsRead, onInspectionClick }) {
   const isDeleted = po?.deleted === true
   const piConf    = po?.pi_confirmed === true
   const isInspection = cat === 'inspection'
+  const isException  = isExceptionRequest(alert)
 
   const styleCat  = isUpd ? 'updated' : cat
   const colors    = CAT_STYLE[styleCat] || CAT_STYLE.po
@@ -100,12 +125,20 @@ function AlertItem({ alert, markAsRead, onInspectionClick }) {
     onInspectionClick(po.po_number)
   }
 
+  const handleExceptionClick = () => {
+    if (!isException) return
+    if (!alert.is_read) markAsRead(alert.id)
+    onExceptionClick()
+  }
+
+  const isClickable = isInspection || isException
+
   return (
     <div
-      onClick={isInspection ? handleInspectionClick : undefined}
+      onClick={isInspection ? handleInspectionClick : isException ? handleExceptionClick : undefined}
       className={`px-4 py-3 border-b border-gray-100 transition-colors
         ${!alert.is_read ? 'bg-blue-50/30' : ''}
-        ${isInspection ? 'hover:bg-blue-50 cursor-pointer' : 'hover:bg-gray-50/60'}`}
+        ${isClickable ? 'hover:bg-blue-50 cursor-pointer' : 'hover:bg-gray-50/60'}`}
       style={leftColor ? { borderLeft: `3px solid ${leftColor}`, paddingLeft: 13 } : {}}
     >
       <div className="flex gap-2.5">
@@ -186,11 +219,20 @@ function AlertItem({ alert, markAsRead, onInspectionClick }) {
             </div>
           )}
 
+          {isException && (
+            <div className="flex items-center gap-1 text-[10px] font-semibold mb-1" style={{ color: CAT_STYLE[cat]?.border || '#7c3aed' }}>
+              View in Exception Requests
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+              </svg>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
             {!alert.is_read && (
               <button
                 onClick={() => markAsRead(alert.id)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-gray-900 text-white hover:bg-gray-700"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-gray-900 text-white hover:bg-gray-700 cursor-pointer"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 Mark read
@@ -216,10 +258,22 @@ function AlertItem({ alert, markAsRead, onInspectionClick }) {
             {isUpd && po?.changes && (
               <button
                 onClick={() => setChangesOpen(o => !o)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border hover:opacity-80"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border hover:opacity-80 cursor-pointer"
                 style={{ background: '#eff6ff', color: '#1e40af', borderColor: '#bfdbfe' }}
               >
                 {changesOpen ? 'Hide' : 'Changes'}
+              </button>
+            )}
+            {(cat === 'product_sheet' || cat === 'pi_sheet') && po?.batch_id && (
+              <button
+                onClick={() => { if (!alert.is_read) markAsRead(alert.id); onGoToBatch(po.batch_id) }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border hover:opacity-80 cursor-pointer"
+                style={cat === 'pi_sheet'
+                  ? { background: '#ede9fe', color: '#5b21b6', borderColor: '#ddd6fe' }
+                  : { background: '#ccfbf1', color: '#115e59', borderColor: '#99f6e4' }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                SKUs
               </button>
             )}
           </div>
@@ -272,7 +326,7 @@ function SummaryCard({ icon, label, value, trend }) {
 function SummaryPanel({ summary, open, onToggle }) {
   return (
     <div className="border-b border-[#e8eaed] flex-shrink-0">
-      <button onClick={onToggle} className="w-full flex items-center justify-between px-4 py-2 hover:bg-gray-50 select-none text-left">
+      <button onClick={onToggle} className="w-full flex items-center justify-between px-4 py-2 hover:bg-gray-50 select-none text-left cursor-pointer">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
@@ -312,7 +366,7 @@ function AlertsSidebar({ isAdmin, counts, activeFilter, setFilter, searchQuery, 
           className="w-full pl-7 pr-6 py-1.5 text-[10px] border border-[#e8eaed] rounded-md bg-white outline-none focus:border-gray-800 placeholder:text-gray-400"
         />
         {searchQuery && (
-          <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">
+          <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         )}
@@ -328,7 +382,7 @@ function AlertsSidebar({ isAdmin, counts, activeFilter, setFilter, searchQuery, 
             <button
               key={item.filter}
               onClick={() => setFilter(item.filter)}
-              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-left transition-all ${
+              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-left transition-all cursor-pointer ${
                 activeFilter === item.filter
                   ? 'bg-white shadow-sm'
                   : 'hover:bg-[#eef0f3]'
@@ -373,11 +427,23 @@ export default function AlertsDrawer() {
     navigate('/dashboard/orders?tab=po-table')
   }, [setFilters, closeDrawer, navigate])
 
+  // Jumps straight into reviewing that batch — same prefillBatch mechanism
+  // PoDrawer's own "Review SKUs →" callout uses (see SkuImportTab.jsx).
+  const handleGoToBatch = useCallback((batchId) => {
+    closeDrawer()
+    navigate(`/dashboard/npd?tab=sku-import&prefillBatch=${batchId}`)
+  }, [closeDrawer, navigate])
+
+  const handleExceptionClick = useCallback(() => {
+    closeDrawer()
+    navigate('/dashboard/orders?tab=otif-exceptions')
+  }, [closeDrawer, navigate])
+
   const subtitle = unreadCount > 0
     ? `${unreadCount} unread · ${alerts.length} total`
     : `${alerts.length} alert${alerts.length !== 1 ? 's' : ''}`
 
-  return (
+  return createPortal(
     <>
       <div
         className={`fixed inset-0 bg-black/45 backdrop-blur-sm z-[9998] transition-opacity duration-300 ${
@@ -409,14 +475,14 @@ export default function AlertsDrawer() {
             <button
               onClick={markAllRead}
               disabled={unreadCount === 0}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-gray-100 border border-[#e8eaed] text-[10px] font-medium text-gray-500 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-gray-100 border border-[#e8eaed] text-[10px] font-medium text-gray-500 hover:bg-gray-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
               Mark all read
             </button>
             <button
               onClick={closeDrawer}
-              className="w-8 h-8 rounded-md border border-[#e8eaed] flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              className="w-8 h-8 rounded-md border border-[#e8eaed] flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
@@ -456,12 +522,13 @@ export default function AlertsDrawer() {
               </div>
             ) : (
               alerts.map(alert => (
-                <AlertItem key={alert.id} alert={alert} markAsRead={markAsRead} onInspectionClick={handleInspectionClick} />
+                <AlertItem key={alert.id} alert={alert} markAsRead={markAsRead} onInspectionClick={handleInspectionClick} onGoToBatch={handleGoToBatch} onExceptionClick={handleExceptionClick} />
               ))
             )}
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   )
 }

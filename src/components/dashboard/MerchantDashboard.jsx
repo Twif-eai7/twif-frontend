@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 
 const EXCLUDED_MERCHANTS = new Set([
   'nitin@jnitin.com', 'nishant@jnitin.com', 'erp2@jnitn.com', 'faisal@jnitin.com',
@@ -213,7 +213,7 @@ export default function MerchantDashboard({
   summary, volumeData, openOrdersData,
   availableBuyers, currentBuyer, currentMerchant,
   isAdmin, merchantList, loading, error, reload,
-  switchBuyer, switchMerchant,
+  switchBuyer, switchMerchant, hideFy26,
 }) {
   const {
     otifYear,        setOtifYear,
@@ -231,12 +231,28 @@ export default function MerchantDashboard({
   const fy26VolumeData = useDashboardStore(s => s.fy26VolumeData)
   const cfg            = FY_CONFIG[fyYear] ?? FY_CONFIG.fy27
 
+  // volumeVendor is persisted globally across merchants — a vendor picked while
+  // browsing someone else's data doesn't exist in Lakshit's rows (always just
+  // "Lakshit Bohra"), so the FY27 chart's vendor filter silently matches
+  // nothing. Reset it whenever landing on his view.
+  useEffect(() => {
+    if (hideFy26) setVolumeVendor('All')
+  }, [hideFy26, setVolumeVendor])
+
   // Shared Y-axis scale so FY26 and FY27 charts are directly comparable
   const [fy26YMax, setFy26YMax] = useState(0)
   const [fy27YMax, setFy27YMax] = useState(0)
   const sharedYMax = Math.max(fy26YMax, fy27YMax) || undefined
   const onFy26YMax = useCallback(v => setFy26YMax(v), [])
   const onFy27YMax = useCallback(v => setFy27YMax(v), [])
+
+  // The FY26 chart is blanked (not mounted) for Lakshit, so it stops calling
+  // onFy26YMax — without this, fy26YMax stays stuck at whatever a previously
+  // viewed merchant's much larger FY26 max was, forcing the FY27 chart onto
+  // that oversized scale too.
+  useEffect(() => {
+    if (hideFy26) setFy26YMax(0)
+  }, [hideFy26])
 
   const currentFyVolume  = parseFloat(summary?.currentFyVolume  || 0)
   const previousFyVolume = parseFloat(summary?.previousFyVolume || 0)
@@ -312,6 +328,16 @@ export default function MerchantDashboard({
     }))
   }, [volumeData, sourcingMode])
 
+  // Union shipped-vendor rows (volumeData) with open-PO-vendor rows (openOrdersData) —
+  // a vendor with only open, not-yet-shipped POs would otherwise be invisible here.
+  const vendorOptions = useMemo(() => {
+    const vendors = new Set([
+      ...(volumeData?.rows || []).map(r => r.vendor),
+      ...(openOrdersData?.rows || []).map(r => r.vendor),
+    ].filter(Boolean))
+    return [...vendors].sort()
+  }, [volumeData, openOrdersData])
+
   if (error) {
     const noData = error.includes('No performance data found')
     return (
@@ -336,7 +362,7 @@ export default function MerchantDashboard({
           onChange={e => switchFyYear(e.target.value)}
         >
           <option value="fy27">FY 2027</option>
-          <option value="fy26">FY 2026</option>
+          {!hideFy26 && <option value="fy26">FY 2026</option>}
         </select>
           </div>
         {/* <div className="flex items-center gap-2">
@@ -614,7 +640,11 @@ export default function MerchantDashboard({
                   </select>
                 </div>
                 <div className={CARD_CONTENT}>
-                  {fy26VolumeData ? (
+                  {hideFy26 ? (
+                    <div className="flex-1 flex items-center justify-center text-xs text-gray-300">
+                      No data
+                    </div>
+                  ) : fy26VolumeData ? (
                     <div className="-ml-6">
                       <Fy26ByMonthsChart
                         volumeData={fy26VolumeData}
@@ -647,8 +677,7 @@ export default function MerchantDashboard({
                     onChange={e => setVolumeVendor(e.target.value)}
                   >
                     <option value="All">All Vendors</option>
-                    {volumeData?.rows && [...new Set(volumeData.rows.map(r => r.vendor).filter(Boolean))].sort()
-                      .map(v => <option key={v} value={v}>{v}</option>)}
+                    {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
                   </select>
                 </div>
                 <div className={CARD_CONTENT}>
@@ -680,8 +709,7 @@ export default function MerchantDashboard({
                     onChange={e => setVolumeVendor(e.target.value)}
                   >
                     <option value="All">All Vendors</option>
-                    {volumeData?.rows && [...new Set(volumeData.rows.map(r => r.vendor).filter(Boolean))].sort()
-                      .map(v => <option key={v} value={v}>{v}</option>)}
+                    {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
                   </select>
                 </div>
                 <div className='-ml-6'>

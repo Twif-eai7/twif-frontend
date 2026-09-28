@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { usePlmStore, SEASONS } from '../../../stores/plmStore'
 import { useOrgsLoading } from '../../../stores/orgsStore'
-import { useMemberId } from '../../../stores/profileStore'
+import { useMemberId, useProfileStore } from '../../../stores/profileStore'
 import { useAuthStore } from '../../../stores/authStore'
 import { supabase } from '../../../lib/supabase'
 import SearchableSelect from '../../ui/SearchableSelect'
-import { resolveBuyerOrgsForMember, resolveSupplierOrgsForBuyer } from '../../../lib/poQueries'
+import { resolveBuyerOrgsForMember, resolveSupplierOrgsForBuyer, resolveBuyerOrgsForSupplier } from '../../../lib/poQueries'
 
 // file.status: 'queued' | 'uploading' | 'done' | 'error'
 
@@ -80,29 +80,53 @@ export default function BuyerSpecModal({ onClose }) {
   const addSkus            = usePlmStore(s => s.addSkus)
   const pruneSpecImages = usePlmStore(s => s.pruneSpecImages)
   const openWorkspace   = usePlmStore(s => s.openWorkspace)
+  const role               = usePlmStore(s => s.role)
   const memberId           = useMemberId()
+  const orgMembership      = useProfileStore(s => s.orgMembership)
   const suppLoading        = useOrgsLoading()
+  const [supplierBuyerOrgs, setSupplierBuyerOrgs] = useState([]) // buyers THIS vendor org actually works with
 
   useEffect(() => { filesRef.current = files }, [files])
   useEffect(() => { contextRef.current = { buyer, supplier, season, memberId } }, [buyer, supplier, season, memberId])
 
+  // Vendor is implicitly their own org here — never a pickable field, same as
+  // CatalogUploadModal.jsx / CreateBulkSkuModal.jsx.
   useEffect(() => {
-    if (!memberId) return
+    if (role === 'supplier' && orgMembership?.orgId) {
+      setSupplier({ id: orgMembership.orgId, name: orgMembership.orgDisplayName || orgMembership.orgName || 'My Organisation' })
+    }
+  }, [role, orgMembership])
+
+  useEffect(() => {
+    if (!memberId || role === 'supplier') return
     resolveBuyerOrgsForMember(memberId).then(orgs => {
       setBuyerOrgs(orgs)
       if (orgs.length === 1) setBuyer(orgs[0])
     })
-  }, [memberId])
+  }, [memberId, role])
+
+  // This modal previously used only resolveBuyerOrgsForMember/resolveSupplierOrgsForBuyer,
+  // both member_organization_access-scoped (merchant-only) — a vendor member has no rows
+  // there, so neither Buyer nor Vendor could ever be set when a vendor opened this modal.
+  // Scoped to buyers this vendor org actually has an active buyer_supplier_links
+  // relationship with, same fix as the other two upload modals.
+  useEffect(() => {
+    if (role !== 'supplier' || !orgMembership?.orgId) return
+    resolveBuyerOrgsForSupplier(orgMembership.orgId).then(orgs => {
+      setSupplierBuyerOrgs(orgs)
+      if (orgs.length === 1) setBuyer(orgs[0])
+    })
+  }, [role, orgMembership?.orgId])
 
   useEffect(() => {
-    if (!buyer?.id || !memberId) return
+    if (!buyer?.id || !memberId || role === 'supplier') return
     setSupplier(null)
     setCascadedSuppliers([])
     setSuppCascadeLoading(true)
     resolveSupplierOrgsForBuyer(memberId, buyer.id)
       .then(orgs => { setCascadedSuppliers(orgs); if (orgs.length === 1) setSupplier(orgs[0]) })
       .finally(() => setSuppCascadeLoading(false))
-  }, [buyer?.id, memberId])
+  }, [buyer?.id, memberId, role])
 
   useEffect(() => {
     if (!running || !files.length) return
@@ -369,37 +393,42 @@ export default function BuyerSpecModal({ onClose }) {
           <div className="flex flex-col min-h-0 overflow-y-auto">
             <div className="p-5 flex flex-col gap-4">
 
-              {/* Buyer + Vendor */}
-              <div className={`grid gap-3 ${buyerOrgs.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                {buyerOrgs.length > 1 && (
-                  <div className="flex flex-col gap-1">
-                    <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${buyerError ? 'text-red-500' : 'text-black/80'}`}>Buyer *</label>
-                    <SearchableSelect
-                      options={buyerOrgs.map(b => ({ value: b.id, label: b.name }))}
-                      value={buyer?.id || ''}
-                      onChange={id => { setBuyer(buyerOrgs.find(b => b.id === id) || null); setBuyerError(false) }}
-                      placeholder="Select buyer…"
-                      disabled={isActive}
-                      triggerClassName={`px-2.5 py-1.5 border rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50 ${buyerError ? 'border-red-500' : 'border-black/[.18]'}`}
-                      dropdownClassName="border border-black/[.15] rounded-md mt-0.5"
-                    />
-                    {buyerError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Select a buyer</span>}
-                  </div>
-                )}
+              {/* Buyer + Vendor — merchant picks both (Buyer cascades Vendor's options);
+                  vendor only picks Buyer (Vendor is implicitly their own org). */}
+              <div className={role === 'supplier' ? 'grid grid-cols-1 gap-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-3'}>
                 <div className="flex flex-col gap-1">
-                  <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${supplierError ? 'text-red-500' : 'text-black/80'}`}>Vendor *</label>
+                  <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${buyerError ? 'text-red-500' : 'text-black/80'}`}>Buyer *</label>
                   <SearchableSelect
-                    options={cascadedSuppliers.map(s => ({ value: s.id, label: s.name }))}
-                    value={supplier?.id || ''}
-                    onChange={id => { setSupplier(cascadedSuppliers.find(s => s.id === id) || null); setSupplierError(false) }}
-                    placeholder={suppCascadeLoading ? 'Loading vendors…' : !buyer ? 'Select buyer first…' : 'Select vendor…'}
-                    disabled={suppLoading || suppCascadeLoading || !buyer || isActive}
-                    loading={suppLoading || suppCascadeLoading}
-                    triggerClassName={`px-2.5 py-1.5 border rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50 ${supplierError ? 'border-red-500' : 'border-black/[.18]'}`}
+                    options={(role === 'supplier' ? supplierBuyerOrgs : buyerOrgs).map(b => ({ value: b.id, label: b.name }))}
+                    value={buyer?.id || ''}
+                    onChange={id => {
+                      const list = role === 'supplier' ? supplierBuyerOrgs : buyerOrgs
+                      setBuyer(list.find(b => b.id === id) || null)
+                      setBuyerError(false)
+                    }}
+                    placeholder={role === 'supplier' && !supplierBuyerOrgs.length ? 'No buyers linked to your organisation yet' : 'Select buyer…'}
+                    disabled={isActive || (role === 'supplier' && !supplierBuyerOrgs.length)}
+                    triggerClassName={`px-2.5 py-1.5 border rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50 ${buyerError ? 'border-red-500' : 'border-black/[.18]'}`}
                     dropdownClassName="border border-black/[.15] rounded-md mt-0.5"
                   />
-                  {supplierError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Select a vendor</span>}
+                  {buyerError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Select a buyer</span>}
                 </div>
+                {role !== 'supplier' && (
+                  <div className="flex flex-col gap-1">
+                    <label className={`text-[11px] font-semibold uppercase tracking-[.06em] ${supplierError ? 'text-red-500' : 'text-black/80'}`}>Vendor *</label>
+                    <SearchableSelect
+                      options={cascadedSuppliers.map(s => ({ value: s.id, label: s.name }))}
+                      value={supplier?.id || ''}
+                      onChange={id => { setSupplier(cascadedSuppliers.find(s => s.id === id) || null); setSupplierError(false) }}
+                      placeholder={suppCascadeLoading ? 'Loading vendors…' : !buyer ? 'Select buyer first…' : 'Select vendor…'}
+                      disabled={suppLoading || suppCascadeLoading || !buyer || isActive}
+                      loading={suppLoading || suppCascadeLoading}
+                      triggerClassName={`px-2.5 py-1.5 border rounded-md text-[13px] bg-white outline-none w-full disabled:opacity-50 ${supplierError ? 'border-red-500' : 'border-black/[.18]'}`}
+                      dropdownClassName="border border-black/[.15] rounded-md mt-0.5"
+                    />
+                    {supplierError && <span className="text-[9px] font-semibold text-red-500 uppercase tracking-[.04em]">Select a vendor</span>}
+                  </div>
+                )}
               </div>
 
               {/* Season */}
@@ -562,7 +591,7 @@ export default function BuyerSpecModal({ onClose }) {
                                 <span className="text-[9px] font-semibold text-black/35 ml-0.5">{refSel.size}/{reviewFile.specImages.length}</span>
                               </div>
                             </div>
-                            <div className="grid grid-cols-5 gap-1.5">
+                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
                               {reviewFile.specImages.map(img => {
                                 const isSel = refSel.has(img.url)
                                 return (

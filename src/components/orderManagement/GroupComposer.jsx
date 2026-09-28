@@ -3,9 +3,10 @@ import { supabase } from '../../lib/supabase'
 import SearchableSelect from '../ui/SearchableSelect'
 import { useShipmentContainerActions } from '../../hooks/useShipmentContainerActions'
 import { useInvoiceDetailsForm } from '../../hooks/useInvoiceDetailsForm'
+import PlanLineItemsBreakdown from './PlanLineItemsBreakdown'
 
 const gl = 'block text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-0.5'
-const gi = 'w-full px-2 py-1.5 rounded-md text-xs text-black bg-gray-100 border border-gray-200 focus:outline-none focus:border-gray-900 transition-colors'
+const gi = 'w-full px-2 py-1.5 rounded-md text-xs text-gray-900 bg-gray-50 border border-gray-200 focus:outline-none focus:border-gray-900 transition-colors'
 
 const cancelCls = 'px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 text-[11px] font-semibold hover:bg-gray-50 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors'
 const saveCls = 'px-2.5 py-1 rounded-md bg-gray-900 text-white text-[11px] font-semibold hover:bg-gray-700 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors'
@@ -63,7 +64,7 @@ export function CreateGroupInline({ buyerName, selectedPlans, onCancel, onSaved 
   }
 
   return (
-    <div className="px-3 py-3 bg-indigo-100 border-t border-indigo-200 space-y-2">
+    <div className="px-3 py-3 bg-indigo-50 border-t border-indigo-100 space-y-2">
       <div className="text-[11px] font-semibold text-indigo-800">
         {selectedPlans.length} selected · {totalCbm.toFixed(2)} m³ total{buyerName ? ` · ${buyerName}` : ''}
       </div>
@@ -82,7 +83,7 @@ export function CreateGroupInline({ buyerName, selectedPlans, onCancel, onSaved 
       ) : vendorOptions.length === 1 ? (
         <div>
           <label className={gl}>Vendor</label>
-          <div className="text-xs text-gray-800 px-2 py-1.5">{vendorOptions[0].label}</div>
+          <div className="text-xs font-semibold text-gray-900 px-2 py-1.5">{vendorOptions[0].label}</div>
         </div>
       ) : null}
       {error && <p className="text-[11px] text-red-600">{error}</p>}
@@ -117,12 +118,32 @@ export function EditGroupInline({ group, plans, onCancel, onSaved }) {
   // through useMyShipmentPlans (that only surfaces draft/pending), so fetch
   // them directly by shipment_invoice_id.
   const [groupPlanCbm, setGroupPlanCbm] = useState({})
+  const [groupPlanLines, setGroupPlanLines] = useState({})
   useEffect(() => {
     let cancelled = false
-    supabase.from('po_shipment_plans').select('po_id, cbm').eq('shipment_invoice_id', group.id)
+    supabase.from('po_shipment_plans')
+      .select(`
+        po_id, cbm,
+        po_shipment_plan_line_items (
+          id, po_line_item_id, quantity, cbm,
+          po_line_item:po_line_items ( buyer_sku_ref, sku_variant )
+        )
+      `)
+      .eq('shipment_invoice_id', group.id)
       .then(({ data }) => {
         if (cancelled) return
         setGroupPlanCbm(Object.fromEntries((data || []).map(p => [p.po_id, p.cbm])))
+        setGroupPlanLines(Object.fromEntries((data || []).map(p => [
+          p.po_id,
+          (p.po_shipment_plan_line_items || []).map(l => ({
+            id: l.id,
+            po_line_item_id: l.po_line_item_id,
+            quantity: l.quantity,
+            cbm: l.cbm,
+            buyer_sku_ref: l.po_line_item?.buyer_sku_ref ?? null,
+            sku_variant: l.po_line_item?.sku_variant ?? null,
+          })),
+        ])))
       })
     return () => { cancelled = true }
   }, [group.id])
@@ -134,6 +155,12 @@ export function EditGroupInline({ group, plans, onCancel, onSaved }) {
     buyerPlans.forEach(p => { map[p.po_id] = p.cbm })
     return map
   }, [groupPlanCbm, buyerPlans])
+
+  const linesByPoId = useMemo(() => {
+    const map = { ...groupPlanLines }
+    buyerPlans.forEach(p => { map[p.po_id] = p.lines })
+    return map
+  }, [groupPlanLines, buyerPlans])
 
   const poOptions = useMemo(() => {
     const seen = new Map()
@@ -218,7 +245,7 @@ export function EditGroupInline({ group, plans, onCancel, onSaved }) {
       ) : vendorOptions.length === 1 ? (
         <div>
           <label className={gl}>Vendor</label>
-          <div className="text-xs text-gray-800 px-2 py-1.5">{vendorOptions[0].label}</div>
+          <div className="text-xs font-semibold text-gray-900 px-2 py-1.5">{vendorOptions[0].label}</div>
         </div>
       ) : (
         <div>
@@ -228,12 +255,12 @@ export function EditGroupInline({ group, plans, onCancel, onSaved }) {
       )}
       <div>
         <label className={gl}>CBM</label>
-        <div className="text-xs text-gray-800 px-2 py-1.5 rounded-md bg-gray-100 border border-gray-200">{totalCbm.toFixed(2)} m³</div>
+        <div className="text-xs font-bold text-gray-900 px-2 py-1.5 rounded-md bg-gray-50 border border-gray-200">{totalCbm.toFixed(2)} m³</div>
       </div>
       <div>
         <div className="flex items-center justify-between mb-1">
           <label className={gl}>Planned POs</label>
-          <span className="text-[10px] text-gray-400">{invoice.po_ids.length} selected</span>
+          <span className="text-[10px] font-semibold text-gray-400">{invoice.po_ids.length} selected</span>
         </div>
         <input
           type="text"
@@ -249,19 +276,22 @@ export function EditGroupInline({ group, plans, onCancel, onSaved }) {
           {filteredPoOptions.map(opt => {
             const checked = invoice.po_ids.includes(opt.value)
             return (
-              <label key={opt.value}
-                className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors
-                  ${checked ? 'bg-indigo-200 border-l-2 border-l-indigo-600' : 'border-l-2 border-l-transparent hover:bg-gray-50'}`}>
-                <input type="checkbox" checked={checked} onChange={() => togglePo(opt.value)}
-                  className="w-3.5 h-3.5 rounded border-gray-300 accent-indigo-600 cursor-pointer flex-shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="text-xs font-medium text-gray-900">{opt.po_number}</span>
-                  {opt.vendor && <span className="text-xs text-gray-400 ml-1.5">{opt.vendor}</span>}
-                </span>
-                {cbmByPoId[opt.value] != null && (
-                  <span className="text-[10px] font-semibold text-gray-500 flex-shrink-0">{cbmByPoId[opt.value]} m³</span>
-                )}
-              </label>
+              <div key={opt.value}
+                className={`px-3 py-2 border-l-2 transition-colors
+                  ${checked ? 'bg-indigo-50 border-l-indigo-600' : 'border-l-transparent hover:bg-gray-50'}`}>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input type="checkbox" checked={checked} onChange={() => togglePo(opt.value)}
+                    className="w-3.5 h-3.5 rounded border-gray-300 accent-indigo-600 cursor-pointer flex-shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="text-xs font-semibold text-gray-900">{opt.po_number}</span>
+                    {opt.vendor && <span className="text-xs text-gray-400 ml-1.5">{opt.vendor}</span>}
+                  </span>
+                  {cbmByPoId[opt.value] != null && (
+                    <span className="text-[10px] font-semibold text-gray-500 flex-shrink-0">{cbmByPoId[opt.value]} m³</span>
+                  )}
+                </label>
+                <PlanLineItemsBreakdown lines={linesByPoId[opt.value]} />
+              </div>
             )
           })}
         </div>

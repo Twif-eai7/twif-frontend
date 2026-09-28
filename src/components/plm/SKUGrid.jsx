@@ -1,14 +1,10 @@
 import { useState, useCallback, useMemo } from 'react'
-import {
-  DndContext, closestCenter,
-  MouseSensor, TouchSensor, useSensor, useSensors,
-} from '@dnd-kit/core'
-import { SortableContext, arrayMove, rectSortingStrategy } from '@dnd-kit/sortable'
+import { Virtuoso } from 'react-virtuoso'
+import { MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { usePlmStore } from '../../stores/plmStore'
-import SKUCard from './SKUCard'
-import SortableCard from './SortableCard'
+import SKUGroupSection from './SKUGroupSection'
 
-function gk(supplier, season) { return `${supplier}|||${season}` }
+function gk(supplier, season, buyerKey) { return `${supplier}|||${season}|||${buyerKey}` }
 
 function sortSeasons(seasons) {
   return [...seasons].sort((a, b) => {
@@ -21,24 +17,50 @@ function sortSeasons(seasons) {
   })
 }
 
-function applyDbOrder(skus) {
-  return [...skus].sort((a, b) => {
-    const aPos = a.sort_position ?? null
-    const bPos = b.sort_position ?? null
-    if (aPos !== null && bPos !== null) return aPos - bPos
-    if (aPos !== null) return -1
-    if (bPos !== null) return 1
-    const aSlide = a.slide_index ?? null
-    const bSlide = b.slide_index ?? null
-    if (aSlide !== null && bSlide !== null) return aSlide - bSlide
-    return new Date(b.created_at) - new Date(a.created_at)
+// Buyer sub-groups within a supplier+season are ordered alphabetically by name, with
+// no-buyer SKUs trailing — matches sortSeasons' "unknowns last" convention.
+function sortBuyerKeys(byBuyer) {
+  return Object.keys(byBuyer).sort((a, b) => {
+    const nameA = byBuyer[a].buyerName, nameB = byBuyer[b].buyerName
+    if (!nameA && !nameB) return 0
+    if (!nameA) return 1
+    if (!nameB) return -1
+    return nameA.localeCompare(nameB)
   })
 }
 
-export default function SKUGrid({ grouped, supplierOrder, role, onEdit, onCardClick, onEditImage }) {
-  const selectedIds   = usePlmStore(s => s.selectedIds)
-  const selectBatch   = usePlmStore(s => s.selectBatch)
-  const reorderSkus   = usePlmStore(s => s.reorderSkus)
+// A persistent, always-visible header row per supplier — the sole entry point for collapsing
+// a supplier's SKUs out of view. This used to be dead code (collapsedSuppliers/toggleSupplier
+// existed but no button called it, so every supplier rendered fully expanded always); it's now
+// required so a collapsed supplier can contribute one row instead of N group rows to the
+// virtualized row list below.
+function SupplierHeaderRow({ supplier, isOpen, onToggle }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(supplier)}
+      className="group flex items-center gap-1.5 w-full text-left pt-3 pb-2 cursor-pointer border-none bg-none"
+    >
+      <span className="flex items-center justify-center w-4 h-4 rounded border border-black/20 text-[#1A1A18] flex-shrink-0 group-hover:border-black/50 group-hover:bg-black/[.04] transition-colors">
+        <svg
+          width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}
+        >
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </span>
+      <span className="text-[11px] font-extrabold uppercase tracking-[.04em] text-[#1A1A18]">{supplier}</span>
+      <span className="flex-1 flex items-center gap-2 ml-2">
+        <span className="flex-1 h-px bg-black/25 group-hover:bg-black/45 transition-colors" />
+        <span className="text-[9px] font-bold uppercase tracking-[.08em] text-[#1A1A18] group-hover:opacity-70 transition-opacity">{isOpen ? 'Collapse' : 'Expand'}</span>
+        <span className="flex-1 h-px bg-black/25 group-hover:bg-black/45 transition-colors" />
+      </span>
+    </button>
+  )
+}
+
+export default function SKUGrid({ grouped, supplierOrder, role, onEdit, onCardClick, onEditImage, scrollParent }) {
+  const reorderSkus = usePlmStore(s => s.reorderSkus)
   const [collapsedSuppliers, setCollapsedSuppliers] = useState(() => new Set())
   // localOrder mirrors the sorted IDs per group for optimistic drag feedback
   const [localOrder, setLocalOrder] = useState({})
@@ -46,11 +68,13 @@ export default function SKUGrid({ grouped, supplierOrder, role, onEdit, onCardCl
   const duplicateProductionSkuIds = useMemo(() => {
     const counts = new Map()
     Object.values(grouped).forEach(seasons =>
-      Object.values(seasons).forEach(skus =>
-        skus.forEach(s => {
-          if (s.production_sku_id)
-            counts.set(s.production_sku_id, (counts.get(s.production_sku_id) || 0) + 1)
-        })
+      Object.values(seasons).forEach(byBuyer =>
+        Object.values(byBuyer).forEach(({ skus }) =>
+          skus.forEach(s => {
+            if (s.production_sku_id)
+              counts.set(s.production_sku_id, (counts.get(s.production_sku_id) || 0) + 1)
+          })
+        )
       )
     )
     const dupes = new Set()
@@ -63,24 +87,45 @@ export default function SKUGrid({ grouped, supplierOrder, role, onEdit, onCardCl
     useSensor(TouchSensor,  { activationConstraint: { delay: 200, tolerance: 6 } }),
   )
 
-  const handleDragEnd = useCallback((event, key, sortedSkus) => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    const currentIds = localOrder[key] ?? sortedSkus.map(s => s.id)
-    const oldIdx = currentIds.indexOf(active.id)
-    const newIdx = currentIds.indexOf(over.id)
-    if (oldIdx === -1 || newIdx === -1) return
-    const newIds = arrayMove(currentIds, oldIdx, newIdx)
+  const handleReorder = useCallback((key, newIds) => {
     setLocalOrder(prev => ({ ...prev, [key]: newIds }))
     reorderSkus(newIds)
-  }, [localOrder, reorderSkus])
+  }, [reorderSkus])
 
-  const toggleSupplier = (sup) =>
+  const toggleSupplier = useCallback((sup) => {
     setCollapsedSuppliers(prev => {
       const next = new Set(prev)
       next.has(sup) ? next.delete(sup) : next.add(sup)
       return next
     })
+  }, [])
+
+  const order = supplierOrder || Object.keys(grouped)
+  const canDrag = role === 'merchant'
+
+  // Flattened, Virtuoso-friendly row list — one row per supplier header, one per
+  // supplier+season group. This is what actually gets virtualized: Virtuoso only ever mounts
+  // the rows near the viewport, so a collapsed/scrolled-away supplier's SKU cards (and their
+  // DndContext, for merchants) aren't in the DOM at all until scrolled near.
+  const rows = useMemo(() => {
+    const list = []
+    order.forEach(supplier => {
+      const seasons = grouped[supplier]
+      if (!seasons) return
+      const isOpen = !collapsedSuppliers.has(supplier)
+      list.push({ type: 'supplier', supplier, isOpen })
+      if (!isOpen) return
+      sortSeasons(Object.keys(seasons)).forEach(season => {
+        const byBuyer = seasons[season]
+        sortBuyerKeys(byBuyer).forEach(buyerKey => {
+          const { buyerName, skus: rawSkus } = byBuyer[buyerKey]
+          if (!rawSkus || !rawSkus.length) return // defensive — see note in SKUGroupSection
+          list.push({ type: 'group', key: gk(supplier, season, buyerKey), supplier, season, buyerKey, buyerName, rawSkus })
+        })
+      })
+    })
+    return list
+  }, [grouped, order, collapsedSuppliers])
 
   if (!Object.keys(grouped).length) {
     return (
@@ -90,96 +135,43 @@ export default function SKUGrid({ grouped, supplierOrder, role, onEdit, onCardCl
     )
   }
 
-  const order = supplierOrder || Object.keys(grouped)
-  const canDrag = role === 'merchant'
+  // Wait for the real scroll container (PLMPage's scrollParent div) to exist before mounting
+  // Virtuoso — it becomes non-null essentially immediately after mount (the ref callback fires
+  // during commit, before paint), so this causes no visible flash. Mounting Virtuoso without a
+  // real customScrollParent would fall back to its own internal scroller, which needs an
+  // explicit height style to size itself correctly and isn't the container we actually want
+  // (PLMPage's existing "scroll to top on filter change" logic targets this specific element).
+  if (!scrollParent) return null
 
   return (
-    <div>
-      {order.map(supplier => {
-        const seasons = grouped[supplier]
-        const isOpen  = !collapsedSuppliers.has(supplier)
-
-        return (
-          <div key={supplier} className="mb-10">
-            {isOpen && sortSeasons(Object.keys(seasons)).map(season => {
-              const key        = gk(supplier, season)
-              const rawSkus    = seasons[season]
-              const sortedSkus = applyDbOrder(rawSkus)
-              // If a local drag has happened this session, honour that order until the store re-fetches
-              const batchIds   = localOrder[key] ?? sortedSkus.map(s => s.id)
-              const idIndex    = Object.fromEntries(batchIds.map((id, i) => [id, i]))
-              const batchSkus  = [...sortedSkus].sort((a, b) => (idIndex[a.id] ?? 9999) - (idIndex[b.id] ?? 9999))
-
-              const allChecked  = batchIds.every(id => selectedIds.has(id))
-              const someChecked = !allChecked && batchIds.some(id => selectedIds.has(id))
-              const buyerNames  = [...new Set(rawSkus.map(s => s.upload_buyer_org_name || s.buyer_org_name).filter(Boolean))]
-              const batchBuyer  = (role === 'merchant' || role === 'supplier') && buyerNames.length === 1 ? buyerNames[0] : null
-
-              return (
-                <div key={season} className="mb-6">
-                  {role === 'supplier' ? (
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <span className="text-[9px] font-bold uppercase tracking-[.06em] text-black/40">
-                        {season}{batchBuyer ? ` · ${batchBuyer}` : ''}
-                      </span>
-                      <span className="text-[9px] font-semibold tabular-nums text-black/25">
-                        {batchSkus.length}
-                      </span>
-                    </div>
-                  ) : (role === 'merchant' || role === 'buyer') && (
-                    <button
-                      type="button"
-                      onClick={e => { e.stopPropagation(); selectBatch(batchIds) }}
-                      className="flex items-center gap-1.5 mb-2 cursor-pointer border-none bg-none group/batch"
-                    >
-                      <span className={`w-3 h-3 border flex-shrink-0 flex items-center justify-center transition-colors
-                        ${allChecked  ? 'bg-[#1A1A18] border-[#1A1A18]'
-                        : someChecked ? 'bg-black/20 border-black/20'
-                        :               'border-black/25 group-hover/batch:border-black/50'}`}
-                      >
-                        {allChecked && (
-                          <svg width="7" height="7" viewBox="0 0 10 10" fill="none">
-                            <polyline points="1.5 5 4 7.5 8.5 2.5" stroke="#F5F3EF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        )}
-                        {someChecked && <span className="w-1.5 h-px bg-white" />}
-                      </span>
-                      <span className="text-[9px] font-bold uppercase tracking-[.06em] text-black/40 group-hover/batch:text-black/60 transition-colors">
-                        {supplier} · {season}{batchBuyer ? ` · ${batchBuyer}` : ''}
-                      </span>
-                      <span className="text-[9px] font-semibold tabular-nums text-black/25">
-                        {batchSkus.length}
-                      </span>
-                    </button>
-                  )}
-
-                  {canDrag ? (
-                    <DndContext
-                      sensors={sensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={e => handleDragEnd(e, key, sortedSkus)}
-                    >
-                      <SortableContext items={batchIds} strategy={rectSortingStrategy}>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4">
-                          {batchSkus.map(sku => (
-                            <SortableCard key={sku.id} sku={sku} role={role} onEdit={onEdit} onCardClick={onCardClick} onEditImage={onEditImage} isDuplicateLink={!!sku.production_sku_id && duplicateProductionSkuIds.has(sku.production_sku_id)} />
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4">
-                      {batchSkus.map(sku => (
-                        <SKUCard key={sku.id} sku={sku} role={role} onEdit={onEdit} onCardClick={onCardClick} onEditImage={onEditImage} isDuplicateLink={!!sku.production_sku_id && duplicateProductionSkuIds.has(sku.production_sku_id)} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )
-      })}
-    </div>
+    <Virtuoso
+      customScrollParent={scrollParent}
+      data={rows}
+      computeItemKey={(index, row) => row.type === 'supplier' ? `hdr:${row.supplier}` : row.key}
+      itemContent={(index, row) => row.type === 'supplier' ? (
+        <SupplierHeaderRow supplier={row.supplier} isOpen={row.isOpen} onToggle={toggleSupplier} />
+      ) : (
+        <SKUGroupSection
+          supplier={row.supplier}
+          season={row.season}
+          buyerKey={row.buyerKey}
+          buyerName={row.buyerName}
+          rawSkus={row.rawSkus}
+          // Only the very first Virtuoso row is above the fold on initial paint — its
+          // first couple of cards are the actual LCP candidates. Everything else stays
+          // loading="lazy" as before.
+          priority={index === 0}
+          role={role}
+          canDrag={canDrag}
+          sensors={sensors}
+          localOrder={localOrder}
+          onReorder={handleReorder}
+          onEdit={onEdit}
+          onCardClick={onCardClick}
+          onEditImage={onEditImage}
+          duplicateProductionSkuIds={duplicateProductionSkuIds}
+        />
+      )}
+    />
   )
 }

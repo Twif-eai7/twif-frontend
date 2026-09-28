@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { usePlmStore, SEASONS, STATUS_LABELS, getCategoryDescendantIds } from '../stores/plmStore'
 import { useMemberId } from '../stores/profileStore'
 
@@ -64,6 +64,11 @@ export function usePLMFiltered() {
   const categories = usePlmStore(s => s.categories)
   const filters    = usePlmStore(s => s.filters)
   const memberId   = useMemberId()
+
+  // Carries supplier order across renders so a background data refresh (e.g. the early-paint
+  // catalog growing into the full admin-overlay set) doesn't reshuffle already-visible cards —
+  // see supplierOrder below.
+  const stableOrderRef = useRef({ sort: null, order: [] })
 
   // Duplicate-link lookups computed over the full unfiltered catalog so the
   // "duplicate" search term and results stay stable regardless of active filters.
@@ -172,7 +177,7 @@ export function usePLMFiltered() {
   }, [skus, memberId])
 
   const statusOptions = useMemo(() => {
-    const STATUS_ORDER = ['inactive', 'invited', 'active', 'reviewing', 'approved', 'sample', 'on_hold', 'rejected', 'production', 'pending_buyer_ref', 'production_sku']
+    const STATUS_ORDER = ['inactive', 'invited', 'active', 'reviewing', 'approved', 'sample', 'sample_shipped', 'on_hold', 'rejected', 'production', 'pending_buyer_ref', 'production_sku']
     const presentStatuses = new Set(skusExStatus.map(s => s.workspace_status ?? s.status ?? 'inactive'))
     const hasPendingRef    = skusExStatus.some(s => s.buyer_ref_status === 'pending_buyer_ref')
     const hasProductionSku = skusExStatus.some(s => s.production_sku_id)
@@ -189,11 +194,18 @@ export function usePLMFiltered() {
   const { grouped, supplierOrder } = useMemo(() => {
     const g = {}
     filteredSkus.forEach(s => {
-      const sup    = s.supplier || 'Unassigned'
-      const season = s.season   || 'No Season'
-      if (!g[sup])         g[sup] = {}
-      if (!g[sup][season]) g[sup][season] = []
-      g[sup][season].push(s)
+      const sup       = s.supplier || 'Unassigned'
+      const season    = s.season   || 'No Season'
+      // Buyer identity mirrors the buyer filter's own matching logic (buyer_org_id ||
+      // upload_buyer_org_id) so a group only merges SKUs that filter as "the same buyer".
+      const buyerId   = s.buyer_org_id || s.upload_buyer_org_id || null
+      const buyerName = s.buyer_org_name || s.upload_buyer_org_name || null
+      const buyerKey  = buyerId || (buyerName ? `name:${buyerName}` : '__no_buyer__')
+
+      if (!g[sup])                   g[sup] = {}
+      if (!g[sup][season])           g[sup][season] = {}
+      if (!g[sup][season][buyerKey]) g[sup][season][buyerKey] = { buyerName, skus: [] }
+      g[sup][season][buyerKey].skus.push(s)
     })
 
     const sort = filters.sort || 'all'
@@ -202,11 +214,14 @@ export function usePLMFiltered() {
     // Pre-compute min/max timestamp per supplier to avoid Date() calls inside sort comparator
     const supplierTs = {}
     for (const sup of Object.keys(g)) {
-      const times = Object.values(g[sup]).flat().map(s => new Date(s.created_at || 0).getTime())
+      const times = Object.values(g[sup])
+        .flatMap(byBuyer => Object.values(byBuyer))
+        .flatMap(({ skus }) => skus)
+        .map(s => new Date(s.created_at || 0).getTime())
       supplierTs[sup] = { min: Math.min(...times), max: Math.max(...times) }
     }
 
-    const order = Object.keys(g).sort((a, b) => {
+    const freshOrder = Object.keys(g).sort((a, b) => {
       if (sortBy === 'alpha') {
         return sortOrder === 'asc' ? a.localeCompare(b) : b.localeCompare(a)
       }
@@ -214,6 +229,22 @@ export function usePLMFiltered() {
       const tB = sortOrder === 'desc' ? supplierTs[b].max : supplierTs[b].min
       return sortOrder === 'asc' ? tA - tB : tB - tA
     })
+
+    // Once a supplier has a rendered position, keep it there across background data refreshes
+    // — reshuffling already-visible cards on a non-interactive update is a real CLS driver.
+    // Only an explicit sort change re-derives order from scratch; suppliers appearing for the
+    // first time (new upload, or the admin-overlay catalog arriving) are appended at the end
+    // either way, so nothing already on screen moves.
+    const prev = stableOrderRef.current
+    let order
+    if (prev.sort === sort) {
+      const carried = prev.order.filter(sup => g[sup])
+      const seen = new Set(carried)
+      order = [...carried, ...freshOrder.filter(sup => !seen.has(sup))]
+    } else {
+      order = freshOrder
+    }
+    stableOrderRef.current = { sort, order }
 
     return { grouped: g, supplierOrder: order }
   }, [filteredSkus, filters.sort])

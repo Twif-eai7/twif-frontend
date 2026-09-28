@@ -1,14 +1,18 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../../components/ui/Sidebar'
 import Header from '../../components/ui/Header'
+import SendRecipientsModal from '../../components/ui/SendRecipientsModal'
 import { useDashboardData } from '../../hooks/useDashboardData'
 import { useUiStore } from '../../stores/uiStore'
 import { useOrgDepartment, useProfileHeader, useRole, useAllowedModules } from '../../stores/profileStore'
 import { useAuth } from '../../hooks/useAuth'
 
-export default function Dashboard() {
-  const dept           = useOrgDepartment() ?? 'Merchandising'
+export default function Dashboard({ children }) {
   const role           = useRole() ?? 'Merchant'
+  // Suppliers/buyers have no internal "department" — don't fall back to the
+  // merchant-staff default for them.
+  const deptDefault    = role === 'Supplier' ? 'Supplier' : role === 'Buyer' ? 'Buyer' : 'Merchandising'
+  const dept           = useOrgDepartment() ?? deptDefault
   const profile        = useProfileHeader()
   const allowedModules = useAllowedModules()
   const { signOut } = useAuth()
@@ -40,7 +44,7 @@ export default function Dashboard() {
           onLogout={signOut}
         />
 
-        <section className="flex-1 min-h-0 overflow-y-auto">
+        <section data-app-scroll-root className="flex-1 min-h-0 overflow-y-auto">
           <div className="w-full h-full flex flex-col">
             {error && (
               <div className="mb-4 py-3 px-4 rounded-lg bg-red-50 text-red-700 text-sm">
@@ -50,10 +54,12 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
-            <Outlet />
+            {children ?? <Outlet />}
           </div>
         </section>
       </main>
+
+      <SendRecipientsModal />
     </div>
   )
 }

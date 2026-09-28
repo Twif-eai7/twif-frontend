@@ -12,18 +12,34 @@ export function usePoShipmentPlans() {
   // directly on drafts now; visibility to logistics is a group-level
   // "Confirm" action (confirmGroup), not a per-plan one, so there's no
   // separate confirm step here anymore.
+  //
+  // Each item now carries per-SKU quantities (see PlanShipmentModal.jsx —
+  // CBM is derived from master data, not typed) instead of a single CBM
+  // number; create_shipment_plan_with_lines (sql/po_shipment_plan_line_items.sql)
+  // inserts the plan + its line items atomically, same reasoning as
+  // create_shipment_plan_group.
   const createPlans = useCallback(async (items) => {
     if (!items?.length) return
-    const rows = items.map(({ po_id, cbm }) => ({ po_id, cbm, planned_by: memberId, status: 'draft' }))
-    const { error } = await supabase.from('po_shipment_plans').insert(rows)
-    if (error) throw error
+    await Promise.all(items.map(({ po_id, lines }) =>
+      supabase.rpc('create_shipment_plan_with_lines', {
+        p_po_id: po_id,
+        p_planned_by: memberId,
+        p_lines: lines,
+      }).then(({ error }) => { if (error) throw error })
+    ))
   }, [memberId])
 
-  const updatePlanCbm = useCallback(async (planId, cbm) => {
-    const { error } = await supabase
-      .from('po_shipment_plans')
-      .update({ cbm, updated_on: new Date().toISOString(), updated_by: memberId })
-      .eq('id', planId)
+  // Replaces every line item on an existing draft/pending plan and
+  // recomputes its rolled-up cbm server-side (update_shipment_plan_lines) —
+  // editing quantities has to go through this, not a direct client-side
+  // update to po_shipment_plans.cbm, or the plan's cbm and its line items
+  // (what was actually planned SKU-by-SKU) can drift apart.
+  const updatePlanLines = useCallback(async (planId, lines) => {
+    const { error } = await supabase.rpc('update_shipment_plan_lines', {
+      p_plan_id: planId,
+      p_updated_by: memberId,
+      p_lines: lines,
+    })
     if (error) throw error
   }, [memberId])
 
@@ -35,7 +51,7 @@ export function usePoShipmentPlans() {
     if (error) throw error
   }, [memberId])
 
-  return { createPlans, updatePlanCbm, withdrawPlan }
+  return { createPlans, updatePlanLines, withdrawPlan }
 }
 
 // Which PO ids currently have an active (draft, pending, or grouped) plan —

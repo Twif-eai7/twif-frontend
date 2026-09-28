@@ -21,21 +21,20 @@ export default function FinanceSection() {
     const userEmail = useAuthStore((s) => s.session?.user?.email)
     const orgMembership = useProfileStore((s) => s.orgMembership)
     const hasJnmPlAccess = canAccessJnmPlFeatures(userEmail, orgMembership)
-
-    useTabGuard('financial', tab, '/dashboard/financial')
+    // Financial is still being rolled out — only org owners see the real tabs for now,
+    // everyone else (admins, members) gets the same "Coming Soon" placeholder used for
+    // other in-progress modules (PCT Tracker, Catalogs, etc.) regardless of which tab.
+    const isOwner = orgMembership?.role === 'owner'
 
     const DEFAULT_TAB = {
         Merchant: 'invoice-list',
         Buyer: 'invoice-list',
     }
-    // Redirect to default tab so the sidebar NavLink is highlighted
-    useEffect(() => {
-        if (!tab && role) {
-            const def = DEFAULT_TAB[role]
-            if (def) navigate(`/dashboard/financial?tab=invoice-list`, { replace: true })
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tab])
+    // Redirects to DEFAULT_TAB when no tab is in the URL, same as before -
+    // now permission-aware too: a restricted member lands on their own
+    // first allowed Financial tab instead of always invoice-list regardless
+    // of whether they can actually see it.
+    useTabGuard('financial', tab, '/dashboard/financial', role ? DEFAULT_TAB[role] : null)
 
     const jnmOnlyTabs = ['expenses-ebidta', 'expenses-ebidta-summary', 'pl-weekly', 'pl-monthly']
     useEffect(() => {
@@ -45,6 +44,7 @@ export default function FinanceSection() {
     }, [tab, hasJnmPlAccess, navigate])
 
     if (role === 'Merchant') {
+        if (!isOwner) return <ComingSoon />
         if (tab === 'invoice-list') return <InvoiceList />
         if (tab === 'invoice-form') return <Invoice />
         if (tab === 'claims') return <QualityClaimsSummary />

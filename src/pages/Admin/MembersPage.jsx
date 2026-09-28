@@ -1,16 +1,119 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAdminCheck } from '../../hooks/useAdminCheck'
+import { useAuth } from '../../hooks/useAuth'
+import { canAccessMembersPage } from '../../utils/membersPageAccess'
 import { useMembers } from '../../hooks/useMembers'
+import { useOrganisations } from '../../hooks/useOrganisations'
+import { useAdminProvisioning } from '../../hooks/useAdminProvisioning'
 import { AdminShell } from '../../components/admin/AdminShell'
 import { PageHeader, Badge, EmptyState, TableSkeleton, StatCard } from '../../components/admin/AdminUi'
+import SearchableSelect from '../../components/ui/SearchableSelect'
 import { supabase } from '../../lib/supabase'
 import { MODULES, defaultModulesForDept } from '../../config/modules'
 
 const ROLE_FILTERS = ['all', 'owner', 'admin', 'member']
+const INPUT_CLS = 'border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-300 w-full'
+const DEPARTMENTS = ['erp', 'it', 'tech', 'merchandising', 'logistics', 'qa']
+
+function NewMemberModal({ onClose, onCreated }) {
+  const { createUser } = useAdminProvisioning()
+  const [orgType, setOrgType] = useState('')
+  const [form, setForm] = useState({ email: '', full_name: '', organization_id: '', role: '', department: '', password: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  // Filtered server-side by type (and fetched with a limit high enough to cover the
+  // whole table) — filtering client-side out of one capped, unfiltered page silently
+  // dropped orgs once the org count grew past that cap.
+  const { orgs: fetchedOrgs } = useOrganisations({ limit: 5000, type: orgType })
+  // /org-customers/orgs/all orders by created_on, not name — sort ascending for the picker.
+  const orgsForType = [...fetchedOrgs].sort((a, b) =>
+    (a.display_name || a.name || '').localeCompare(b.display_name || b.name || '', undefined, { sensitivity: 'base' }))
+
+  async function submit() {
+    if (!form.email || !form.organization_id || !form.role) { setError('Email, organization, and role are required'); return }
+    if (form.password && form.password.length < 4) { setError('Password must be at least 4 characters'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      await createUser({ ...form, department: form.department || null, password: form.password || undefined })
+      onCreated()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm px-4">
+      <div className="bg-white rounded-2xl border border-stone-200 shadow-xl w-full max-w-md p-6">
+        <h3 className="text-base font-medium text-stone-900 mb-1">New member</h3>
+        <p className="text-sm text-stone-500 mb-4">Creates a login-capable account — onboarding is marked complete immediately, so they log in via the normal 4-digit OTP flow at /auth.</p>
+        <div className="space-y-3">
+          <input className={INPUT_CLS} placeholder="Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+          <input className={INPUT_CLS} placeholder="Full name" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
+          <select className={INPUT_CLS} value={orgType} onChange={e => { setOrgType(e.target.value); setForm(f => ({ ...f, organization_id: '' })) }}>
+            <option value="">Merchant, Buyer, or Supplier?</option>
+            <option value="merchant">Merchant</option>
+            <option value="buyer">Buyer</option>
+            <option value="supplier">Supplier</option>
+          </select>
+          <SearchableSelect
+            options={orgsForType.map(o => ({ value: o.id, label: o.display_name || o.name }))}
+            value={form.organization_id}
+            onChange={(id) => setForm(f => ({ ...f, organization_id: id }))}
+            placeholder={orgType ? 'Select organisation…' : 'Pick a type first'}
+            disabled={!orgType}
+            triggerClassName={`${INPUT_CLS} ${!orgType ? 'opacity-60' : ''}`}
+            dropdownClassName="rounded-lg border border-stone-200"
+          />
+          <div className="flex gap-3">
+            <select className={INPUT_CLS} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+              <option value="">Select role…</option>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+              <option value="owner">Owner</option>
+            </select>
+            <select className={INPUT_CLS} value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))}>
+              <option value="">No department</option>
+              {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <input
+            type="password"
+            className={INPUT_CLS}
+            placeholder="Password (optional — leave blank to generate one)"
+            value={form.password}
+            onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+          />
+        </div>
+        {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+        <div className="flex gap-2 justify-end mt-5">
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm font-medium text-stone-600 bg-stone-100 rounded-lg hover:bg-stone-200 transition-colors">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-stone-900 rounded-lg hover:bg-stone-700 transition-colors disabled:opacity-50">
+            {saving ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function MembersPage() {
   const { checking } = useAdminCheck()
-  const { members, total, loading, error } = useMembers({ limit: 100 })
+  const { user, loading: authLoading } = useAuth()
+  const navigate = useNavigate()
+  // Beyond the tech-admin gate in useAdminCheck, this page is limited to a fixed
+  // email allowlist; everyone else is bounced to the dashboard.
+  const emailAllowed = canAccessMembersPage(user?.email)
+  useEffect(() => {
+    if (!authLoading && !emailAllowed) navigate('/dashboard', { replace: true })
+  }, [authLoading, emailAllowed, navigate])
+
+  const { members, total, loading, error, refresh } = useMembers({ limit: 100 })
+  const { updateMember } = useAdminProvisioning()
+  const [showNewMember, setShowNewMember] = useState(false)
 
   const [roleFilter, setRoleFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -25,7 +128,34 @@ export default function MembersPage() {
   const [drawerSaving, setDrawerSaving] = useState(false)
   const [drawerError, setDrawerError] = useState(null)
 
-  if (checking) return null
+  // Organisation/role/department — one combined save action, separate from module
+  // access below (which has its own save button and its own RLS-permitted update path).
+  const [drawerOrgType, setDrawerOrgType] = useState('')
+  const [drawerOrgId, setDrawerOrgId] = useState('')
+  const [drawerRole, setDrawerRole] = useState('')
+  const [memberSaving, setMemberSaving] = useState(false)
+  const [memberError, setMemberError] = useState(null)
+  // Filtered server-side by type — see NewMemberModal above for why this can't be a
+  // client-side filter over one capped, unfiltered page.
+  const { orgs: orgsForDrawerType } = useOrganisations({ limit: 5000, type: drawerOrgType })
+
+  // Organization Access (member_organization_access) — a separate axis from
+  // allowed_modules/role above: which buyer orgs' data this member can pull
+  // via resolveMerchantMemberLinkIds (dashboard_summary, MIS, etc.),
+  // independent of which UI modules/tabs they can see. The "add" dropdown
+  // only offers buyers for now; allOrgsForAccess stays unfiltered (not just
+  // buyers) purely to resolve display names for any pre-existing grant of a
+  // different type, so an older non-buyer row still shows a real name
+  // instead of "Unknown organization".
+  const [drawerAccess, setDrawerAccess] = useState([])
+  const [newAccessOrgId, setNewAccessOrgId] = useState('')
+  const [accessSaving, setAccessSaving] = useState(false)
+  const [accessError, setAccessError] = useState(null)
+  const { orgs: allOrgsForAccess } = useOrganisations({ limit: 5000 })
+  const { orgs: buyerOrgsForAccess } = useOrganisations({ limit: 5000, type: 'buyer' })
+  const orgsById = Object.fromEntries(allOrgsForAccess.map(o => [o.id, o]))
+
+  if (checking || authLoading || !emailAllowed) return null
 
   const filtered = members.filter(m => {
     const matchRole = roleFilter === 'all' || m.role === roleFilter
@@ -46,7 +176,8 @@ export default function MembersPage() {
     setSelectedMember(member)
     setDrawerError(null)
     setDrawerLoading(true)
-    const [memberRes, citiesRes] = await Promise.all([
+    setAccessError(null)
+    const [memberRes, citiesRes, accessRes] = await Promise.all([
       supabase
         .from('organization_members')
         .select('allowed_modules, department, assigned_regions')
@@ -57,6 +188,10 @@ export default function MembersPage() {
         .select('city')
         .eq('type', 'supplier')
         .not('city', 'is', null),
+      supabase
+        .from('member_organization_access')
+        .select('id, organization_id, buyer_supplier_link_id, access_role')
+        .eq('member_id', member.id),
     ])
     setDrawerLoading(false)
     if (memberRes.error) { setDrawerError(memberRes.error.message); return }
@@ -65,6 +200,12 @@ export default function MembersPage() {
     setDrawerRegions(memberRes.data.assigned_regions ?? null)
     const cities = [...new Set((citiesRes.data || []).map(c => c.city).filter(Boolean))].sort()
     setAvailableCities(cities)
+    setDrawerOrgType(member.organizations?.type || '')
+    setDrawerOrgId(member.organizations?.id || '')
+    setDrawerRole(member.role || '')
+    setMemberError(null)
+    if (accessRes.error) { setAccessError(accessRes.error.message); setDrawerAccess([]) }
+    else setDrawerAccess(accessRes.data || [])
   }
 
   function closeDrawer() {
@@ -75,6 +216,65 @@ export default function MembersPage() {
     setAvailableCities([])
     setCitySearch('')
     setDrawerError(null)
+    setDrawerOrgType('')
+    setDrawerOrgId('')
+    setDrawerRole('')
+    setDrawerAccess([])
+    setNewAccessOrgId('')
+    setAccessError(null)
+    setMemberError(null)
+  }
+
+  async function saveMemberDetails() {
+    if (!drawerOrgId || !drawerRole) { setMemberError('Organisation and role are required'); return }
+    const updates = {}
+    if (drawerOrgId !== selectedMember.organizations?.id) updates.organization_id = drawerOrgId
+    if (drawerRole !== selectedMember.role) updates.role = drawerRole
+    if (drawerDepartment !== (selectedMember.department ?? null)) updates.department = drawerDepartment
+    if (!Object.keys(updates).length) { setMemberError('Nothing changed'); return }
+
+    setMemberSaving(true)
+    setMemberError(null)
+    try {
+      // Routed through the backend, not a direct Supabase update — RLS scopes
+      // organization_members UPDATEs to rows within the admin's own org, which blocks
+      // changing organization_id itself (see routes/onBoardCustomers.js for detail).
+      await updateMember(selectedMember.id, updates)
+      closeDrawer()
+      refresh()
+    } catch (err) {
+      setMemberError(err.message)
+    } finally {
+      setMemberSaving(false)
+    }
+  }
+
+  async function addOrgAccess() {
+    if (!newAccessOrgId || drawerAccess.some(r => r.organization_id === newAccessOrgId)) return
+    setAccessSaving(true)
+    setAccessError(null)
+    const { data, error: insErr } = await supabase
+      .from('member_organization_access')
+      .insert({ member_id: selectedMember.id, organization_id: newAccessOrgId, access_role: 'manager' })
+      .select('id, organization_id, buyer_supplier_link_id, access_role')
+    setAccessSaving(false)
+    if (insErr) { setAccessError(insErr.message); return }
+    setDrawerAccess(prev => [...prev, ...(data || [])])
+    setNewAccessOrgId('')
+  }
+
+  async function removeOrgAccess(id) {
+    setAccessSaving(true)
+    setAccessError(null)
+    const { data, error: delErr } = await supabase
+      .from('member_organization_access')
+      .delete()
+      .eq('id', id)
+      .select('id')
+    setAccessSaving(false)
+    if (delErr) { setAccessError(delErr.message); return }
+    if (!data?.length) { setAccessError('No row removed — your Supabase RLS policy is likely blocking this. Add a DELETE policy for admins on member_organization_access.'); return }
+    setDrawerAccess(prev => prev.filter(r => r.id !== id))
   }
 
   function toggleFullAccess() {
@@ -162,7 +362,22 @@ export default function MembersPage() {
   return (
     <AdminShell>
       <div className="px-8 py-8 max-w-6xl">
-        <PageHeader title="Members" subtitle={`${total} total portal users`} />
+        <PageHeader
+          title="Members"
+          subtitle={`${total} total portal users`}
+          action={
+            <button onClick={() => setShowNewMember(true)} className="px-4 py-2 text-sm font-medium bg-stone-900 text-white rounded-lg hover:bg-stone-700 transition-colors">
+              New member
+            </button>
+          }
+        />
+
+        {showNewMember && (
+          <NewMemberModal
+            onClose={() => setShowNewMember(false)}
+            onCreated={() => { setShowNewMember(false); refresh() }}
+          />
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-4 gap-4 mb-8">
@@ -273,6 +488,139 @@ export default function MembersPage() {
                 {selectedMember.department && <Badge label={selectedMember.department} />}
                 {selectedMember.organizations?.display_name && (
                   <Badge label={selectedMember.organizations.display_name} />
+                )}
+              </div>
+
+              {/* Organisation, role, department — one combined save */}
+              <div className="mb-6 pb-6 border-b border-stone-200">
+                <div className="text-xs font-medium text-stone-400 uppercase tracking-wider mb-3">
+                  Organisation
+                </div>
+                <div className="space-y-2">
+                  <select
+                    className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-300"
+                    value={drawerOrgType}
+                    onChange={e => { setDrawerOrgType(e.target.value); setDrawerOrgId('') }}
+                  >
+                    <option value="">Select type…</option>
+                    <option value="merchant">Merchant</option>
+                    <option value="buyer">Buyer</option>
+                    <option value="supplier">Supplier</option>
+                  </select>
+                  <SearchableSelect
+                    options={orgsForDrawerType.map(o => ({ value: o.id, label: o.display_name || o.name }))}
+                    value={drawerOrgId}
+                    onChange={setDrawerOrgId}
+                    placeholder={drawerOrgType ? 'Select organisation…' : 'Pick a type first'}
+                    disabled={!drawerOrgType}
+                    triggerClassName={`w-full border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-300 ${!drawerOrgType ? 'opacity-60' : ''}`}
+                    dropdownClassName="rounded-lg border border-stone-200"
+                  />
+
+                  <div className="flex gap-2 pt-1">
+                    <select
+                      className="w-1/2 border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-300"
+                      value={drawerRole}
+                      onChange={e => setDrawerRole(e.target.value)}
+                    >
+                      <option value="">Select role…</option>
+                      <option value="member">Member</option>
+                      <option value="admin">Admin</option>
+                      <option value="owner">Owner</option>
+                    </select>
+                    <select
+                      className="w-1/2 border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-300"
+                      value={drawerDepartment ?? ''}
+                      disabled={drawerLoading}
+                      onChange={e => setDrawerDepartment(e.target.value || null)}
+                    >
+                      <option value="">No department</option>
+                      {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+
+                  {memberError && <p className="text-xs text-red-600">{memberError}</p>}
+                  <button
+                    onClick={saveMemberDetails}
+                    disabled={memberSaving || drawerLoading || !drawerOrgId || !drawerRole}
+                    className="w-full px-3 py-2 text-sm font-medium bg-stone-900 text-white rounded-lg hover:bg-stone-700 transition-colors disabled:opacity-50"
+                  >
+                    {memberSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Organization Access (member_organization_access) — separate from
+                  allowed_modules above: which buyer/supplier orgs' data this member
+                  can pull (dashboard_summary, MIS, etc. via resolveMerchantMemberLinkIds),
+                  not which UI modules/tabs they see. Applies instantly — no save button,
+                  each add/remove writes straight to the table. */}
+              <div className="mb-6 pb-6 border-b border-stone-200">
+                <div className="text-xs font-medium text-stone-400 uppercase tracking-wider mb-3">
+                  Organization Access
+                </div>
+
+                {drawerLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <div className="w-5 h-5 border-2 border-stone-300 border-t-stone-700 rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1.5 mb-3">
+                      {drawerAccess.length === 0 && (
+                        <p className="text-xs text-stone-400">No organization access granted.</p>
+                      )}
+                      {drawerAccess.map(row => {
+                        const org = row.organization_id ? orgsById[row.organization_id] : null
+                        const label = row.organization_id
+                          ? (org?.display_name || org?.name || 'Unknown organization')
+                          : 'Specific buyer↔supplier link'
+                        const sub = row.organization_id
+                          ? `Whole organization${org?.type ? ` · ${org.type}` : ''} · ${row.access_role || 'manager'}`
+                          : `Link-scoped · ${row.access_role || 'manager'}`
+                        return (
+                          <div key={row.id} className="flex items-center justify-between gap-2 px-3 py-2 border border-stone-200 rounded-lg">
+                            <div className="min-w-0">
+                              <div className="text-sm text-stone-800 truncate">{label}</div>
+                              <div className="text-[11px] text-stone-400">{sub}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeOrgAccess(row.id)}
+                              disabled={accessSaving}
+                              className="text-xs font-medium text-red-600 hover:text-red-700 transition-colors flex-shrink-0 disabled:opacity-50"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <div className="flex-1 min-w-0">
+                        <SearchableSelect
+                          options={buyerOrgsForAccess
+                            .filter(o => !drawerAccess.some(r => r.organization_id === o.id))
+                            .map(o => ({ value: o.id, label: o.display_name || o.name }))}
+                          value={newAccessOrgId}
+                          onChange={setNewAccessOrgId}
+                          placeholder="Add buyer access…"
+                          triggerClassName="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-300"
+                          dropdownClassName="rounded-lg border border-stone-200"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addOrgAccess}
+                        disabled={!newAccessOrgId || accessSaving}
+                        className="px-3 py-2 text-sm font-medium bg-stone-900 text-white rounded-lg hover:bg-stone-700 transition-colors disabled:opacity-50 flex-shrink-0"
+                      >
+                        {accessSaving ? '…' : 'Add'}
+                      </button>
+                    </div>
+                    {accessError && <p className="text-xs text-red-600 mt-2">{accessError}</p>}
+                  </>
                 )}
               </div>
 

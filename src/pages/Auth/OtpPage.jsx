@@ -5,9 +5,7 @@ import { AuthSplitLayout } from '../../components/auth'
 import { OTPInput, Alert, Spinner } from '../../components/ui'
 import { useOTPTimer } from '../../hooks/useOtpTimer'
 import { usePortalUser } from '../../hooks/usePortalUser'
-import { verifyEmailOtp } from '../../lib/authOtp'
-
-const OTP_LENGTH = 8
+import { verifyEmailOtp, OTP_LENGTH } from '../../lib/authOtp'
 
 export default function OTPPage({ forcedRole: routeForcedRole }) {
   const navigate = useNavigate()
@@ -117,7 +115,7 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
         Verify code
       </h2>
       <p className="text-center text-sm text-[#64748b] leading-relaxed mb-6">
-        We sent an {OTP_LENGTH}-digit code to{' '}
+        We sent a {OTP_LENGTH}-digit code to{' '}
         <strong className="text-[#0f172a] font-medium">{email}</strong>
       </p>
 

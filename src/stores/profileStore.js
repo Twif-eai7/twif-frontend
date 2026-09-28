@@ -158,7 +158,7 @@ export function useIsAdmin() {
     return (
       om.orgType === 'merchant' &&
       (om.role === 'admin' || om.role === 'owner') &&
-      (om.department === 'tech' || om.department === null)
+      om.department === 'tech'
     )
   })
 }

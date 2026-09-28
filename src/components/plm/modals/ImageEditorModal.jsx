@@ -29,6 +29,19 @@ const ShapesIcon = () => (
     <rect x="3" y="3" width="12" height="12" rx="2"/><circle cx="17" cy="17" r="4"/>
   </svg>
 )
+// Plain outline icons for the cloud/speech shape-tool buttons — the ☁/💬 unicode glyphs they
+// replace render as full-color emoji in most fonts (ignoring currentColor entirely), so they
+// looked pale/washed-out next to every other line-drawn icon in this toolbar.
+const CloudShapeIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h.79a4.5 4.5 0 1 1 0 9z"/>
+  </svg>
+)
+const SpeechShapeIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+  </svg>
+)
 
 const ANNOTATION_TOOLS = [
   { key: 'none',        icon: <MoveIcon />,        label: 'Move',       title: 'Select / move' },
@@ -40,6 +53,7 @@ const ANNOTATION_TOOLS = [
 const SHAPE_TOOLS = [
   { key: 'line',     icon: '╱',  title: 'Line' },
   { key: 'arrow',    icon: '↗',  title: 'Arrow' },
+  { key: 'pointer',  icon: '➤',  title: 'Pointer arrow (solid)' },
   { key: 'rect',     icon: '▭',  title: 'Rectangle' },
   { key: 'ellipse',  icon: '◯',  title: 'Ellipse' },
   { key: 'triangle', icon: '△',  title: 'Triangle' },
@@ -47,6 +61,8 @@ const SHAPE_TOOLS = [
   { key: 'pentagon', icon: '⬠',  title: 'Pentagon' },
   { key: 'hexagon',  icon: '⬡',  title: 'Hexagon' },
   { key: 'star',     icon: '★',  title: 'Star' },
+  { key: 'cloud',    icon: <CloudShapeIcon />,  title: 'Cloud (thought bubble)' },
+  { key: 'speech',   icon: <SpeechShapeIcon />, title: 'Speech bubble' },
 ]
 
 const FONT_FAMILIES = [
@@ -124,6 +140,31 @@ export default function ImageEditorModal({
   const [flipV,      setFlipV]      = useState(false)
   const [imageScale, setImageScale] = useState(1.0)
   const [slideRatio, setSlideRatio] = useState('1:1')
+  // Purely a viewport zoom (like the fullscreen image-viewer's top-right zoom bar) — a CSS
+  // scale on the canvas stack, not baked into the export. getCanvasPos already derives its
+  // scale factor from getBoundingClientRect(), which reflects this transform automatically,
+  // so mouse/annotation coordinates stay correct with no other changes needed.
+  const [viewZoom, setViewZoom] = useState(1)
+  const viewZoomHoldRef = useRef(null)
+  const clampViewZoom = z => Math.min(3, Math.max(0.3, Math.round(z * 100) / 100))
+  // Without this, closing the editor while a zoom +/- button is held down (mouse still
+  // down) left the hold-to-repeat interval running forever — its onMouseUp/onMouseLeave
+  // clear-paths are on a DOM node that no longer exists once the modal unmounts.
+  useEffect(() => () => clearInterval(viewZoomHoldRef.current), [])
+
+  // ── loupe (magnifier) ────────────────────────────────────────────────────
+  // A floating, cursor-following magnified preview — lets you check fine detail (small
+  // text, texture) without changing the actual viewZoom of the whole canvas.
+  const LOUPE_SIZE = 200
+  const loupeCanvasRef = useRef(null)
+  const [loupeOn,  setLoupeOn]  = useState(false)
+  const [loupePos, setLoupePos] = useState(null) // { content: {x,y} logical slide coords, screen: {x,y} relative to wrapRef's scrollable content }
+  const [loupeZoom, setLoupeZoom] = useState(3)
+  // Double-clicking a point in the photo pins the loupe there (ignores further mouse
+  // movement) so you can look at the magnified box itself instead of it darting around
+  // under the cursor. A plain click unpins it (resumes following the cursor), and a click
+  // outside the photo closes the loupe entirely — see handleWrapClick/handleWrapDoubleClick.
+  const [loupeLocked, setLoupeLocked] = useState(false)
   // A permanent caption baked as a footer strip below the image on export — distinct from the
   // Text annotation tool, which floats on top of the photo and can be moved/hidden/cropped out.
   const [remarks,         setRemarks]         = useState('')
@@ -136,21 +177,36 @@ export default function ImageEditorModal({
   const [cropRect,    setCropRect]    = useState(null)
   const cropStartRef  = useRef(null)
   const isDraggingRef = useRef(false)
+  // Cached canvas bounding rect for the duration of a single drag gesture. getBoundingClientRect()
+  // forces a synchronous layout read — calling it on every mousemove (as before) meant fast
+  // drags/drawing gestures competed with layout thrashing and visibly lagged behind the cursor.
+  // Captured once on mousedown, reused for the whole gesture, cleared on mouseup/mouseleave.
+  const canvasRectRef = useRef(null)
 
   // ── annotation state ─────────────────────────────────────────────────────
   const annotationCanvasRef = useRef(null)
-  const [annoTool,   setAnnoTool]   = useState('none')   // 'none'|'pen'|'highlighter'|'rect'|'ellipse'|'line'|'arrow'|'triangle'|'star'|'text'
-  const [annoColor,  setAnnoColor]  = useState('#ff3b30')
+  // Visual-only overlay (pointer-events: none) stacked above the interactive annotation
+  // canvas, used solely to paint whatever is actively changing (a new shape being drawn, or
+  // an existing one being moved/resized). Keeping that off the committed-annotations canvas
+  // means a fast drag only ever repaints one shape per frame instead of the whole list.
+  const draftCanvasRef = useRef(null)
+  const [annoTool,   setAnnoTool]   = useState('none')   // 'none'|'pen'|'highlighter'|'rect'|'ellipse'|'line'|'arrow'|'pointer'|'cloud'|'triangle'|'star'|'text'
+  const [annoColor,  setAnnoColor]  = useState('#1a1a18')
   const [annoWidth,  setAnnoWidth]  = useState(4)
   const [annoFontSize, setAnnoFontSize] = useState(24)
   const [annoFontFamily, setAnnoFontFamily] = useState(FONT_FAMILIES[0].value)
   const [shapesMenuOpen, setShapesMenuOpen] = useState(false)
+  const [mobSaveMenu, setMobSaveMenu] = useState(false) // phone footer: Copy / Replace chooser
   const shapesMenuRef = useRef(null)
   const [annotations,     setAnnotations]     = useState([])   // committed shapes/strokes
   const [annoHistory,     setAnnoHistory]     = useState([])   // undo stack (past states)
   const [annoFuture,      setAnnoFuture]      = useState([])   // redo stack
   const [selectedAnnoId,  setSelectedAnnoId]  = useState(null)
-  const [draftAnno,       setDraftAnno]       = useState(null) // shape/stroke currently being drawn
+  const [draftAnno,       setDraftAnno]       = useState(null) // brand-new shape/stroke currently being drawn
+  // The existing annotation currently being dragged/resized, with live (uncommitted) geometry.
+  // Kept out of `annotations` until mouseup so every intermediate frame only touches this one
+  // object + the draft canvas, instead of re-rendering the full committed list each tick.
+  const [liveEditAnno,    setLiveEditAnno]    = useState(null)
   const [textEditing,     setTextEditing]     = useState(null) // { x, y, value, editingId? } while placing/editing a text annotation
   const annoDrawingRef    = useRef(false)
   const annoStartRef      = useRef(null)
@@ -178,7 +234,9 @@ export default function ImageEditorModal({
   // ── refs for values used inside canvas callbacks ─────────────────────────
   // (avoids stale closures in mouse handlers)
   const stateRef = useRef({})
-  stateRef.current = { rotation, flipH, flipV, imageScale, slideRatio, cropMode, cropRect }
+  useEffect(() => {
+    stateRef.current = { rotation, flipH, flipV, imageScale, slideRatio, cropMode, cropRect }
+  })
 
   // ── locked guard ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -342,6 +400,134 @@ export default function ImageEditorModal({
     ctx.closePath()
   }
 
+  // Solid "block arrow" pointer — a filled shaft + triangular head, distinct from the thin
+  // stroked `arrow` (line + open chevron) so users have a bolder option for calling out a spot.
+  // Thickness is driven by `width` (the same brush-width control every other tool uses) —
+  // previously it was computed purely from arrow length, so the width slider did nothing.
+  const drawPointerArrow = (ctx, x1, y1, x2, y2, color, width) => {
+    const dx = x2 - x1, dy = y2 - y1
+    const len = Math.hypot(dx, dy) || 1
+    const ux = dx / len, uy = dy / len
+    const px = -uy, py = ux // unit vector perpendicular to the shaft
+    const shaftW  = Math.max(2, width * 2.2)
+    const headW   = shaftW * 2.4
+    const headLen = Math.min(len * 0.5, Math.max(headW, width * 6))
+    const shaftEndX = x2 - ux * headLen
+    const shaftEndY = y2 - uy * headLen
+
+    ctx.beginPath()
+    ctx.moveTo(x1 + px * shaftW / 2,        y1 + py * shaftW / 2)
+    ctx.lineTo(shaftEndX + px * shaftW / 2, shaftEndY + py * shaftW / 2)
+    ctx.lineTo(shaftEndX + px * headW / 2,  shaftEndY + py * headW / 2)
+    ctx.lineTo(x2, y2)
+    ctx.lineTo(shaftEndX - px * headW / 2,  shaftEndY - py * headW / 2)
+    ctx.lineTo(shaftEndX - px * shaftW / 2, shaftEndY - py * shaftW / 2)
+    ctx.lineTo(x1 - px * shaftW / 2,        y1 - py * shaftW / 2)
+    ctx.closePath()
+    ctx.fillStyle = color
+    ctx.fill()
+  }
+
+  // Scalloped "cloud" outline — walks the bounding rectangle's own perimeter (not an
+  // ellipse) and draws one outward-bulging semicircle per edge segment. Bump radius is
+  // derived directly from the segment spacing on each edge, so bumps never grow larger
+  // than the gap between them — avoiding the self-intersecting "curl" look you get when
+  // bump size and point spacing are computed independently (e.g. via ellipse circumference,
+  // which mismatches badly on wide/short boxes).
+  const drawCloud = (ctx, x1, y1, x2, y2) => {
+    const left = Math.min(x1, x2), top = Math.min(y1, y2)
+    // Extend right/bottom themselves (not just a separately-clamped w/h) for a tiny drag,
+    // so the bump-spacing math and the actual edge anchors stay in sync. Previously w/h were
+    // clamped to a 24px floor while right/bottom stayed at the true (much smaller) drag
+    // distance — the loops then spaced bumps across the fictional 24px span while anchoring
+    // them to the real few-pixel-wide box, producing a tangled, self-intersecting scribble.
+    const right  = Math.max(Math.max(x1, x2), left + 24)
+    const bottom = Math.max(Math.max(y1, y2), top + 24)
+    const w = right - left
+    const h = bottom - top
+
+    // Target bump diameter, clamped so tiny boxes don't get one giant bump and large
+    // boxes don't get hundreds of tiny ones.
+    const targetBumpD = Math.max(14, Math.min(36, Math.min(w, h) / 3))
+    const nTop    = Math.max(2, Math.round(w / targetBumpD))
+    const nSide   = Math.max(2, Math.round(h / targetBumpD))
+    const stepX   = w / nTop
+    const stepY   = h / nSide
+    const rTop    = stepX / 2
+    const rSide   = stepY / 2
+
+    ctx.beginPath()
+    // Top edge, left → right, bumps arc upward (outward)
+    for (let i = 0; i < nTop; i++) {
+      const cx = left + stepX * (i + 0.5)
+      ctx.arc(cx, top, rTop, Math.PI, 0, false)
+    }
+    // Right edge, top → bottom, bumps arc rightward (outward)
+    for (let i = 0; i < nSide; i++) {
+      const cy = top + stepY * (i + 0.5)
+      ctx.arc(right, cy, rSide, -Math.PI / 2, Math.PI / 2, false)
+    }
+    // Bottom edge, right → left, bumps arc downward (outward)
+    for (let i = 0; i < nTop; i++) {
+      const cx = right - stepX * (i + 0.5)
+      ctx.arc(cx, bottom, rTop, 0, Math.PI, false)
+    }
+    // Left edge, bottom → top, bumps arc leftward (outward)
+    for (let i = 0; i < nSide; i++) {
+      const cy = bottom - stepY * (i + 0.5)
+      ctx.arc(left, cy, rSide, Math.PI / 2, -Math.PI / 2, false)
+    }
+    ctx.closePath()
+
+    // Thought-bubble tail — 2-3 small circles trailing away from the bottom-left corner,
+    // shrinking as they go, each its own closed sub-path (drawn separately, not connected).
+    // The bottom-edge bumps themselves already extend rTop past `bottom` — the first tail
+    // circle's offset has to clear THAT point, not `bottom` itself, or it punches back up
+    // into the bump row above it.
+    const baseR = Math.min(rTop, rSide) * 0.85
+    let tx = left + stepX * 0.35
+    let ty = bottom + rTop + baseR * 1.1
+    const stepDx = -stepX * 0.22
+    const stepDy = baseR * 1.7
+    for (let i = 0; i < 3; i++) {
+      const r = baseR * (1 - i * 0.32)
+      if (r < 2) break
+      ctx.moveTo(tx + r, ty)
+      ctx.arc(tx, ty, r, 0, Math.PI * 2)
+      tx += stepDx
+      ty += stepDy
+    }
+  }
+
+  // "Speech bubble" — a rounded rectangle with a pointed tail notched directly into its
+  // bottom edge (one continuous outline, unlike the cloud's separate circular tail).
+  const drawSpeechBubble = (ctx, x1, y1, x2, y2) => {
+    const left = Math.min(x1, x2), top = Math.min(y1, y2)
+    const right  = Math.max(Math.max(x1, x2), left + 24)
+    const bottom = Math.max(Math.max(y1, y2), top + 24)
+    const w = right - left, h = bottom - top
+    const radius = Math.min(18, Math.min(w, h) * 0.25)
+
+    const tailW   = Math.min(w * 0.22, 28)
+    const tailLen = Math.min(h * 0.4, 32)
+    const tailBaseX = left + w * 0.28
+
+    ctx.beginPath()
+    ctx.moveTo(left + radius, top)
+    ctx.lineTo(right - radius, top)
+    ctx.arcTo(right, top, right, top + radius, radius)
+    ctx.lineTo(right, bottom - radius)
+    ctx.arcTo(right, bottom, right - radius, bottom, radius)
+    ctx.lineTo(tailBaseX + tailW / 2, bottom)
+    ctx.lineTo(tailBaseX - tailW * 0.15, bottom + tailLen)
+    ctx.lineTo(tailBaseX - tailW / 2, bottom)
+    ctx.lineTo(left + radius, bottom)
+    ctx.arcTo(left, bottom, left, bottom - radius, radius)
+    ctx.lineTo(left, top + radius)
+    ctx.arcTo(left, top, left + radius, top, radius)
+    ctx.closePath()
+  }
+
   // ── pen smoothing + shape-snap ───────────────────────────────────────────
   // Freehand pen strokes are jittery by nature. We smooth them with a small moving
   // average, then check whether the smoothed path is "trying" to be a straight
@@ -418,6 +604,12 @@ export default function ImageEditorModal({
       return { x: a.x, y: a.y, w: (a.text?.length || 1) * a.fontSize * 0.55, h: a.fontSize }
     }
     const x = Math.min(a.x1, a.x2), y = Math.min(a.y1, a.y2)
+    // Cloud/speech render with a 24px minimum size (see drawCloud/drawSpeechBubble) even when
+    // drawn from a tiny drag — this box has to match that, or a small cloud/speech only
+    // registers clicks/resize-handles near its origin point, not its actual visible area.
+    if (a.type === 'cloud' || a.type === 'speech') {
+      return { x, y, w: Math.max(Math.abs(a.x2 - a.x1), 24), h: Math.max(Math.abs(a.y2 - a.y1), 24) }
+    }
     return { x, y, w: Math.abs(a.x2 - a.x1), h: Math.abs(a.y2 - a.y1) }
   }
 
@@ -460,7 +652,17 @@ export default function ImageEditorModal({
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
       } else if (a.type === 'arrow') {
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-        drawArrowHead(ctx, x1, y1, x2, y2, Math.max(10, a.width * 3))
+        // Scale with width, not a fixed 10px floor — at width 1 that floor made the head
+        // look disproportionately bold next to a hairline shaft.
+        drawArrowHead(ctx, x1, y1, x2, y2, Math.max(6, a.width * 2.5))
+      } else if (a.type === 'pointer') {
+        drawPointerArrow(ctx, x1, y1, x2, y2, a.color, a.width)
+      } else if (a.type === 'cloud') {
+        drawCloud(ctx, x1, y1, x2, y2)
+        ctx.stroke()
+      } else if (a.type === 'speech') {
+        drawSpeechBubble(ctx, x1, y1, x2, y2)
+        ctx.stroke()
       } else if (a.type === 'triangle') {
         drawPolygon(ctx, cx, cy, Math.max(w, h) / 2, 3); ctx.stroke()
       } else if (a.type === 'diamond') {
@@ -501,6 +703,8 @@ export default function ImageEditorModal({
     ctx.restore()
   }, [])
 
+  // Committed-only layer — deliberately NOT keyed on draftAnno/liveEditAnno, so dragging a
+  // new shape or resizing/moving an existing one never re-renders the full annotation list.
   const drawAnnotations = useCallback(() => {
     const ac = annotationCanvasRef.current
     if (!ac) return
@@ -508,10 +712,21 @@ export default function ImageEditorModal({
     ctx.clearRect(0, 0, ac.width, ac.height)
     annotations.forEach(a => {
       if (a.id === textEditing?.editingId) return
+      if (a.id === liveEditAnno?.id) return // being live-edited — drawn on the overlay instead
       drawOneAnnotation(ctx, a, a.id === selectedAnnoId)
     })
+  }, [annotations, selectedAnnoId, drawOneAnnotation, textEditing, liveEditAnno])
+
+  // Cheap per-frame layer — only ever draws the single shape actively changing right now
+  // (a fresh draft, or an existing annotation mid-move/resize), never the whole list.
+  const drawLiveOverlay = useCallback(() => {
+    const dc = draftCanvasRef.current
+    if (!dc) return
+    const ctx = dc.getContext('2d')
+    ctx.clearRect(0, 0, dc.width, dc.height)
     if (draftAnno) drawOneAnnotation(ctx, draftAnno, false)
-  }, [annotations, draftAnno, selectedAnnoId, drawOneAnnotation, textEditing])
+    if (liveEditAnno) drawOneAnnotation(ctx, liveEditAnno, true)
+  }, [draftAnno, liveEditAnno, drawOneAnnotation])
 
   const redraw = useCallback(() => {
     const canvas     = canvasRef.current
@@ -530,16 +745,36 @@ export default function ImageEditorModal({
     canvas.style.width  = slideW + 'px'
     canvas.style.height = slideH + 'px'
 
-    // Crop overlay stays at logical pixels so mouse coordinate math stays correct
-    cropCanvas.width  = slideW
-    cropCanvas.height = slideH
+    // Crop/annotation/draft overlays now also render at full device-pixel density —
+    // previously they stayed at 1x (slideW/slideH) while the main image canvas rendered at
+    // physW/physH, so on any HiDPI/Retina screen every annotation (text, strokes, shapes)
+    // looked visibly softer than the sharp photo underneath. Coordinates drawn onto these
+    // canvases stay in the same logical slideW/slideH units as before (annotations, hit-
+    // testing, and the export scale math all still assume that space) — ctx.scale(dpr, dpr)
+    // below is what makes those logical-unit draw calls land at full bitmap resolution.
+    // getCanvasPos() correspondingly divides out this same dpr factor to keep mouse
+    // coordinates in logical space too.
+    cropCanvas.width  = physW
+    cropCanvas.height = physH
+    cropCanvas.style.width  = slideW + 'px'
+    cropCanvas.style.height = slideH + 'px'
+    cropCanvas.getContext('2d').scale(dpr, dpr)
 
-    // Annotation overlay also stays at logical pixels — shape coordinates are stored
-    // in this space so they scale correctly whenever the slide is resized/rotated.
     const annoCanvas = annotationCanvasRef.current
     if (annoCanvas) {
-      annoCanvas.width  = slideW
-      annoCanvas.height = slideH
+      annoCanvas.width  = physW
+      annoCanvas.height = physH
+      annoCanvas.style.width  = slideW + 'px'
+      annoCanvas.style.height = slideH + 'px'
+      annoCanvas.getContext('2d').scale(dpr, dpr)
+    }
+    const draftCanvas = draftCanvasRef.current
+    if (draftCanvas) {
+      draftCanvas.width  = physW
+      draftCanvas.height = physH
+      draftCanvas.style.width  = slideW + 'px'
+      draftCanvas.style.height = slideH + 'px'
+      draftCanvas.getContext('2d').scale(dpr, dpr)
     }
 
     if (slide) {
@@ -556,7 +791,8 @@ export default function ImageEditorModal({
 
     drawCropOverlay()
     drawAnnotations()
-  }, [getSlideSize, renderSlide, drawCropOverlay, drawAnnotations])
+    drawLiveOverlay()
+  }, [getSlideSize, renderSlide, drawCropOverlay, drawAnnotations, drawLiveOverlay])
 
   // ── load image ───────────────────────────────────────────────────────────
   const loadSrc = useCallback((src) => {
@@ -603,13 +839,33 @@ export default function ImageEditorModal({
   useEffect(() => { if (sourceImgRef.current) redraw() },
     [rotation, flipH, flipV, imageScale, slideRatio, cropRect, redraw])
 
-  // re-draw the annotation layer only (cheap — no image re-render) when shapes change
-  useEffect(() => { drawAnnotations() }, [annotations, draftAnno, selectedAnnoId, drawAnnotations])
+  // re-draw the committed annotation layer only (cheap — no image re-render) when the
+  // committed list/selection changes — NOT on every draft/live-edit tick (see drawLiveOverlay).
+  useEffect(() => { drawAnnotations() }, [drawAnnotations])
+
+  // re-draw just the live overlay (draft shape or in-progress move/resize) — this is the
+  // one that fires on every mousemove during a gesture, so it stays a single-shape draw.
+  useEffect(() => { drawLiveOverlay() }, [drawLiveOverlay])
+
+  // Clicking a toolbar button to switch tools (e.g. "Move") while a shape is still mid-drag
+  // never fires a mouseup/mouseleave on the canvas — call this at every such switch so the
+  // in-progress draft/move/resize doesn't get stranded forever on the live overlay.
+  const abortAnnoGesture = () => {
+    annoDrawingRef.current = false
+    annoMoveRef.current = null
+    annoResizeRef.current = null
+    setDraftAnno(null)
+    setLiveEditAnno(null)
+  }
 
   // close the shapes dropdown on outside click
   useEffect(() => {
     if (!shapesMenuOpen) return
     const onDocClick = (e) => {
+      // `[data-shapes-menu]` covers both the desktop dropdown (inside shapesMenuRef) and the
+      // mobile picker/toggle, which live in a different part of the tree — without this a tap
+      // on a mobile shape button counted as "outside" and closed the menu before its onClick.
+      if (e.target.closest?.('[data-shapes-menu]')) return
       if (shapesMenuRef.current && !shapesMenuRef.current.contains(e.target)) setShapesMenuOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
@@ -632,13 +888,140 @@ export default function ImageEditorModal({
 
   const getCanvasPos = (e) => {
     const cc = cropCanvasRef.current
-    const r  = cc.getBoundingClientRect()
-    const scX = cc.width  / r.width
-    const scY = cc.height / r.height
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY
+    const r  = canvasRectRef.current || cc.getBoundingClientRect()
+    // cc.width/height are now device-pixel-density bitmap sizes (see redraw()), but every
+    // consumer of this function (annotation storage, hit-testing, export scale math) still
+    // works in logical slideW/slideH units — dividing out devicePixelRatio here keeps this
+    // function's output in that same logical space regardless of screen density, while
+    // r.width/r.height still correctly capture any CSS zoom (viewZoom) applied on top.
+    const dpr = window.devicePixelRatio || 1
+    const scX = (cc.width  / dpr) / r.width
+    const scY = (cc.height / dpr) / r.height
+    // On touchend/touchcancel, e.touches is an empty (but still truthy) TouchList — the
+    // touch that just ended only exists in changedTouches. Falling back to e.clientX/Y
+    // when neither list has an entry avoids indexing undefined on those events.
+    const touch = e.touches?.[0] || e.changedTouches?.[0]
+    const clientX = touch ? touch.clientX : e.clientX
+    const clientY = touch ? touch.clientY : e.clientY
     return { x: (clientX - r.left) * scX, y: (clientY - r.top) * scY }
   }
+
+  // Whether a logical-space point (as returned by getCanvasPos) falls outside the slide/
+  // photo itself — used both to hide the loupe over the checkered padding area, and to
+  // deselect/close things on a double-click out there.
+  const isOutsideSlide = (pos) => {
+    const { slideW, slideH } = getSlideSize()
+    return pos.x < 0 || pos.y < 0 || pos.x > slideW || pos.y > slideH
+  }
+
+  // Shared position math for the loupe box — used both while following the cursor
+  // (mousemove) and when pinning it to a fixed point (double-click). Returns null if the
+  // point falls outside the actual slide/photo (nothing to magnify over the checkered
+  // padding area surrounding it).
+  const computeLoupePos = (e) => {
+    const content = getCanvasPos(e)
+    if (isOutsideSlide(content)) return null
+    const wrap = wrapRef.current
+    if (!wrap) return { content, screen: { x: 0, y: 0 } }
+    const wrapRect = wrap.getBoundingClientRect()
+    // Cursor position relative to wrapRef's scrollable CONTENT (not just its current
+    // viewport rect), so this stays correct regardless of how far the canvas is scrolled.
+    const cursorX = e.clientX - wrapRect.left + wrap.scrollLeft
+    const cursorY = e.clientY - wrapRect.top + wrap.scrollTop
+
+    // Flip to the opposite side of the cursor whenever there isn't room on the preferred
+    // (bottom-right) side — like a tooltip/popover does — rather than just clamping the box
+    // against the edge, which still left it half off-screen/clipped. An absolutely-positioned
+    // child that exceeds its overflow:auto ancestor's bounds also enlarges that ancestor's
+    // scrollable area, which was shoving the whole canvas sideways whenever this happened.
+    const OFFSET = 24
+    const boxW   = LOUPE_SIZE
+    const boxH   = LOUPE_SIZE + 24 // + header row height
+    const viewRight  = wrap.scrollLeft + wrap.clientWidth
+    const viewBottom = wrap.scrollTop  + wrap.clientHeight
+
+    const x = (cursorX + OFFSET + boxW <= viewRight)
+      ? cursorX + OFFSET
+      : Math.max(wrap.scrollLeft, cursorX - OFFSET - boxW)
+    const y = (cursorY + OFFSET + boxH <= viewBottom)
+      ? cursorY + OFFSET
+      : Math.max(wrap.scrollTop, cursorY - OFFSET - boxH)
+
+    return { content, screen: { x, y } }
+  }
+
+  // A single click is how you dismiss the loupe: inside the photo it unpins a locked box
+  // (resumes following the cursor); outside the photo (the checkered padding) it closes the
+  // loupe entirely, same as toggling the toolbar button off.
+  const handleWrapClick = (e) => {
+    if (!loupeOn) return
+    if (isOutsideSlide(getCanvasPos(e))) {
+      setLoupeOn(false)
+      setLoupePos(null)
+      setLoupeLocked(false)
+      return
+    }
+    if (loupeLocked) {
+      setLoupeLocked(false)
+      setLoupePos(computeLoupePos(e))
+    }
+  }
+
+  // Double-clicking a point in the photo pins the loupe there. Double-clicking the checkered
+  // padding area (outside the actual photo) is a clear "I'm done with whatever I was doing"
+  // signal instead — deselect any selected annotation and close the loupe if it's open.
+  const handleWrapDoubleClick = (e) => {
+    if (isOutsideSlide(getCanvasPos(e))) {
+      setSelectedAnnoId(null)
+      if (loupeOn) { setLoupeOn(false); setLoupePos(null); setLoupeLocked(false) }
+      return
+    }
+    if (loupeOn) {
+      setLoupeLocked(true)
+      setLoupePos(computeLoupePos(e))
+    }
+  }
+
+  // Tracks the cursor for the loupe overlay, independent of whatever the current tool is
+  // doing — bound directly on the slide wrapper so it keeps working while drawing/cropping.
+  // No-ops once locked (see handleWrapDoubleClick) so a pinned box stays put.
+  const handleLoupeMouseMove = (e) => {
+    if (!loupeOn || loupeLocked) return
+    setLoupePos(computeLoupePos(e))
+  }
+
+  const drawLoupe = useCallback(() => {
+    const lc = loupeCanvasRef.current
+    if (!lc || !loupePos) return
+    // This canvas's own bitmap resolution has to match devicePixelRatio too — same class of
+    // issue as the main annotation overlays: without this, the loupe's OWN display canvas
+    // rendered at 1x and looked soft on any HiDPI/Retina screen, on top of whatever it was
+    // magnifying. Resizing every draw call keeps this correct if the screen's dpr ever
+    // changes (e.g. dragging the window to a different monitor).
+    const dpr = window.devicePixelRatio || 1
+    lc.width  = LOUPE_SIZE * dpr
+    lc.height = LOUPE_SIZE * dpr
+    const ctx = lc.getContext('2d')
+    ctx.scale(dpr, dpr)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, LOUPE_SIZE, LOUPE_SIZE)
+
+    const srcSize = (LOUPE_SIZE / loupeZoom) * dpr
+    const sx = loupePos.content.x * dpr - srcSize / 2
+    const sy = loupePos.content.y * dpr - srcSize / 2
+
+    // Composite the flattened photo + committed annotations, same layering as on-screen.
+    // drawImage silently clips a source rect that extends past the source canvas's edges
+    // (per spec), so no bounds-checking is needed here even near the image's corners.
+    const main = canvasRef.current
+    if (main) ctx.drawImage(main, sx, sy, srcSize, srcSize, 0, 0, LOUPE_SIZE, LOUPE_SIZE)
+    const anno = annotationCanvasRef.current
+    if (anno) ctx.drawImage(anno, sx, sy, srcSize, srcSize, 0, 0, LOUPE_SIZE, LOUPE_SIZE)
+  }, [loupePos, loupeZoom])
+
+  useEffect(() => { drawLoupe() }, [drawLoupe])
 
   const clampRect = (sx, sy, ex, ey) => {
     const canvas = canvasRef.current
@@ -652,6 +1035,7 @@ export default function ImageEditorModal({
   const handleCropMouseDown = (e) => {
     if (!stateRef.current.cropMode) return
     e.preventDefault()
+    canvasRectRef.current = cropCanvasRef.current?.getBoundingClientRect() || null
     isDraggingRef.current = true
     cropStartRef.current  = getCanvasPos(e)
     setCropRect(null)
@@ -672,6 +1056,7 @@ export default function ImageEditorModal({
     isDraggingRef.current = false
     const { x, y } = getCanvasPos(e)
     setCropRect(clampRect(cropStartRef.current.x, cropStartRef.current.y, x, y))
+    canvasRectRef.current = null
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -679,6 +1064,10 @@ export default function ImageEditorModal({
   // ──────────────────────────────────────────────────────────────────────────
 
   const annotationsRef = useRef([])
+  // Only ever invoked from event handlers (mousedown, commit, etc.), never during render —
+  // the compiler's static analysis can't prove that across this component's size, but the
+  // impurity (Date.now/Math.random) never affects render output or memoization here.
+  // eslint-disable-next-line react-hooks/purity
   const genAnnoId = () => `a_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 
   const hitTestAnno = (a, x, y) => {
@@ -734,7 +1123,7 @@ export default function ImageEditorModal({
     return scaleAnnotation(original, anchor, sx, sy)
   }
 
-  const commitAnnotations = (nextList) => {
+  const commitAnnotations = useCallback((nextList) => {
     // Capture the pre-commit list BEFORE mutating the ref. setAnnoHistory's updater
     // isn't invoked synchronously — React runs it after this function returns, by which
     // point annotationsRef.current would already equal nextList, so reading the ref
@@ -744,34 +1133,45 @@ export default function ImageEditorModal({
     const prevList = annotationsRef.current
     setAnnoHistory(h => [...h, prevList])
     setAnnoFuture([])
+    // react-hooks/immutability: the restore effect below also writes this ref, which the
+    // compiler treats as effect-owned — but reading it synchronously here (not via a
+    // setState updater) is required to dodge the StrictMode double-invoke bug described
+    // above. Deliberate; a "real" fix means moving annotations to an external store.
+    // eslint-disable-next-line react-hooks/immutability
     annotationsRef.current = nextList
     setAnnotations(nextList)
-  }
+  }, [])
 
   // These read/write annoHistory & annoFuture directly (not via a setState updater
   // function) — a functional updater here would be double-invoked by React 18 StrictMode
   // in dev, duplicating entries pushed onto the other stack (see commitTextEditing).
-  const handleUndoAnno = () => {
+  // Wrapped in useCallback (deps on the relevant stack only) so the keydown effect below
+  // doesn't tear down/re-add its listener on every render.
+  const handleUndoAnno = useCallback(() => {
     if (!annoHistory.length) return
     const prev = annoHistory[annoHistory.length - 1]
     const current = annotationsRef.current // capture before mutating — see commitAnnotations
     setAnnoFuture(f => [current, ...f])
     setAnnoHistory(h => h.slice(0, -1))
+    // react-hooks/immutability: see commitAnnotations — deliberate synchronous ref write.
+    // eslint-disable-next-line react-hooks/immutability
     annotationsRef.current = prev
     setAnnotations(prev)
     setSelectedAnnoId(null)
-  }
+  }, [annoHistory, setSelectedAnnoId])
 
-  const handleRedoAnno = () => {
+  const handleRedoAnno = useCallback(() => {
     if (!annoFuture.length) return
     const next = annoFuture[0]
     const current = annotationsRef.current // capture before mutating — see commitAnnotations
     setAnnoHistory(h => [...h, current])
     setAnnoFuture(f => f.slice(1))
+    // react-hooks/immutability: see commitAnnotations — deliberate synchronous ref write.
+    // eslint-disable-next-line react-hooks/immutability
     annotationsRef.current = next
     setAnnotations(next)
     setSelectedAnnoId(null)
-  }
+  }, [annoFuture, setSelectedAnnoId])
 
   // Ctrl/Cmd+Z (undo) and Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z (redo). Registered on window in the
   // capture phase so it fires no matter what has focus inside the modal — a bubble-phase
@@ -800,6 +1200,27 @@ export default function ImageEditorModal({
     setSelectedAnnoId(null)
   }
 
+  // Delete/Backspace to remove the selected annotation — the near-universal shortcut in
+  // every other annotation/design tool. Previously only available via the toolbar trash icon.
+  // Separate effect (not merged into the undo/redo one above) so it can depend on
+  // selectedAnnoId without touching that effect's already-verified dependency behavior.
+  // Reads annotationsRef.current directly (rather than depending on handleDeleteSelectedAnno,
+  // which isn't memoized) so this effect only re-subscribes when selectedAnnoId itself changes.
+  useEffect(() => {
+    if (!selectedAnnoId) return
+    const onKeyDown = (e) => {
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        commitAnnotations(annotationsRef.current.filter(a => a.id !== selectedAnnoId))
+        setSelectedAnnoId(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [selectedAnnoId, commitAnnotations])
+
   const translateAnnotation = (a, dx, dy) => {
     if (a.type === 'pen' || a.type === 'highlighter') {
       return { ...a, points: a.points.map(p => ({ x: p.x + dx, y: p.y + dy })) }
@@ -809,6 +1230,7 @@ export default function ImageEditorModal({
   }
 
   const handleAnnoMouseDown = (e) => {
+    canvasRectRef.current = cropCanvasRef.current?.getBoundingClientRect() || null
     const tool = annoTool
     // A range/select drag on the text toolbar leaves textEditing open (see the input's
     // onBlur guard) without focus anywhere — clicking the canvas next should still commit it.
@@ -843,6 +1265,11 @@ export default function ImageEditorModal({
       return
     }
 
+    // e.detail is the click count (2+ for the 2nd/3rd click of a rapid multi-click). Without
+    // this guard, each click of a double-click independently started AND committed its own
+    // tiny shape at the same spot — so drawing one shape then double-clicking it (with the
+    // same shape tool still active) silently left a second throwaway duplicate behind.
+    if (e.detail > 1) return
     e.preventDefault()
     setSelectedAnnoId(null)
     const { x, y } = getCanvasPos(e)
@@ -857,12 +1284,21 @@ export default function ImageEditorModal({
   }
 
   const handleAnnoDoubleClick = (e) => {
-    if (annoTool !== 'none') return
     const { x, y } = getCanvasPos(e)
     const hit = [...annotationsRef.current].reverse().find(a => hitTestAnno(a, x, y))
-    if (!hit || hit.type !== 'text') return
+    if (!hit) return
     e.preventDefault()
     annoMoveRef.current = null
+    // Double-clicking any existing annotation is a deliberate "I want to work with THIS
+    // shape now" signal — switch to Move/select mode regardless of whichever tool (Cloud,
+    // Speech, Pen, ...) happened to be active, so it's immediately selected and ready to
+    // move/resize/delete, instead of silently doing nothing (or drawing an unrelated new
+    // shape underneath it) while some other tool stayed active.
+    setAnnoTool('none')
+    if (hit.type !== 'text') {
+      setSelectedAnnoId(hit.id)
+      return
+    }
     setSelectedAnnoId(null)
     setAnnoColor(hit.color)
     setAnnoFontSize(hit.fontSize)
@@ -877,9 +1313,10 @@ export default function ImageEditorModal({
       const { x, y } = getCanvasPos(e)
       annoResizeRef.current.lastX = x
       annoResizeRef.current.lastY = y
-      const { id, original, corner } = annoResizeRef.current
-      const resized = resizeAnnotationTo(original, corner, x, y)
-      setAnnotations(list => list.map(a => a.id === id ? resized : a))
+      const { original, corner } = annoResizeRef.current
+      // Live preview only — the full annotations list is untouched until mouseup commits it,
+      // so a fast resize drag only ever repaints this one shape, not the whole canvas.
+      setLiveEditAnno(resizeAnnotationTo(original, corner, x, y))
       return
     }
     if (annoMoveRef.current) {
@@ -887,8 +1324,8 @@ export default function ImageEditorModal({
       annoMoveRef.current.lastX = x
       annoMoveRef.current.lastY = y
       const { original, startX, startY } = annoMoveRef.current
-      const moved = translateAnnotation(original, x - startX, y - startY)
-      setAnnotations(list => list.map(a => a.id === moved.id ? moved : a))
+      // Live preview only — see the resize branch above.
+      setLiveEditAnno(translateAnnotation(original, x - startX, y - startY))
       return
     }
     if (annoDrawingRef.current) {
@@ -911,15 +1348,48 @@ export default function ImageEditorModal({
     }
   }
 
+  // A shape drawn with a click that barely (or never) moved commits with x1≈x2/y1≈y2 —
+  // effectively a single point. Corner/edge-handle resizing scales the stored geometry
+  // about a fixed anchor, and scaling a degenerate point by any factor is still that same
+  // point (0 × anything = 0) — so the shape could visually render at its cosmetic minimum
+  // size (see annoBounds/drawCloud/drawSpeechBubble) but resize handles could never actually
+  // grow it, only move it. Giving it a real minimum size at commit time fixes that at the root.
+  const ensureMinShapeSize = (d, min = 24) => {
+    const dx = Math.abs(d.x2 - d.x1), dy = Math.abs(d.y2 - d.y1)
+    // Only step in for a genuine "clicked, barely/never dragged" point — a deliberately
+    // drawn straight horizontal or vertical line/arrow legitimately has one dimension at
+    // zero and must stay that way, so leave anything with a real extent on either axis alone.
+    if (dx >= min || dy >= min) return d
+    let { x1, y1, x2, y2 } = d
+    x2 = x1 + (x2 >= x1 ? min : -min)
+    y2 = y1 + (y2 >= y1 ? min : -min)
+    return { ...d, x2, y2 }
+  }
+
+  // A plain click with no real drag (total movement under a few pixels) shouldn't leave any
+  // annotation behind at all — every other drawing tool works this way, and without this,
+  // the first click of a double-click (while a shape/pen tool is still active right after
+  // finishing a drawing) silently committed an invisible garbage point-annotation at that
+  // spot. Being the most-recently-added item, double-click's hit-test then matched THAT
+  // instead of the shape the user actually meant to select.
+  const isTrivialDraft = (d) => {
+    if (d.type === 'pen' || d.type === 'highlighter') {
+      if (d.points.length < 2) return true
+      const xs = d.points.map(p => p.x), ys = d.points.map(p => p.y)
+      return (Math.max(...xs) - Math.min(...xs)) < 4 && (Math.max(...ys) - Math.min(...ys)) < 4
+    }
+    return Math.abs(d.x2 - d.x1) < 4 && Math.abs(d.y2 - d.y1) < 4
+  }
+
   const finalizeAnnotation = (d) => {
     if (d.type === 'highlighter') {
       return d.points.length >= 4 ? { ...d, points: smoothPoints(d.points, 1) } : d
     }
-    if (d.type !== 'pen') return d
+    if (d.type !== 'pen') return ensureMinShapeSize(d)
     const snap = snapPenStroke(d.points)
-    if (snap.snapTo === 'line')    return { id: d.id, type: 'line',    color: d.color, width: d.width, x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 }
-    if (snap.snapTo === 'rect')    return { id: d.id, type: 'rect',    color: d.color, width: d.width, x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 }
-    if (snap.snapTo === 'ellipse') return { id: d.id, type: 'ellipse', color: d.color, width: d.width, x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 }
+    if (snap.snapTo === 'line')    return ensureMinShapeSize({ id: d.id, type: 'line',    color: d.color, width: d.width, x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 })
+    if (snap.snapTo === 'rect')    return ensureMinShapeSize({ id: d.id, type: 'rect',    color: d.color, width: d.width, x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 })
+    if (snap.snapTo === 'ellipse') return ensureMinShapeSize({ id: d.id, type: 'ellipse', color: d.color, width: d.width, x1: snap.x1, y1: snap.y1, x2: snap.x2, y2: snap.y2 })
     return { ...d, points: snap.points }
   }
 
@@ -946,11 +1416,13 @@ export default function ImageEditorModal({
   }
 
   const handleAnnoMouseUp = () => {
+    canvasRectRef.current = null
     if (annoResizeRef.current) {
       const { id, original, corner, lastX, lastY } = annoResizeRef.current
       annoResizeRef.current = null
       const resized = resizeAnnotationTo(original, corner, lastX, lastY)
       commitAnnotations(annotationsRef.current.map(a => a.id === id ? resized : a))
+      setLiveEditAnno(null)
       return
     }
     if (annoMoveRef.current) {
@@ -961,6 +1433,7 @@ export default function ImageEditorModal({
         const moved = translateAnnotation(original, dx, dy)
         commitAnnotations(annotationsRef.current.map(a => a.id === id ? moved : a))
       }
+      setLiveEditAnno(null)
       return
     }
     if (!annoDrawingRef.current) return
@@ -968,7 +1441,9 @@ export default function ImageEditorModal({
     // Read draftAnno directly rather than via a setState updater — StrictMode double-invokes
     // updater functions in dev, which would call commitAnnotations (and genAnnoId()) twice,
     // committing the shape/stroke twice and corrupting the undo history (see commitTextEditing).
-    if (draftAnno) commitAnnotations([...annotationsRef.current, finalizeAnnotation(draftAnno)])
+    if (draftAnno && !isTrivialDraft(draftAnno)) {
+      commitAnnotations([...annotationsRef.current, finalizeAnnotation(draftAnno)])
+    }
     setDraftAnno(null)
   }
 
@@ -977,9 +1452,11 @@ export default function ImageEditorModal({
   // ──────────────────────────────────────────────────────────────────────────
 
   const clearAnnotations = () => {
+    // react-hooks/immutability: see commitAnnotations — deliberate synchronous ref write.
+    // eslint-disable-next-line react-hooks/immutability
     annotationsRef.current = []
     setAnnotations([]); setAnnoHistory([]); setAnnoFuture([])
-    setSelectedAnnoId(null); setDraftAnno(null); setTextEditing(null); setAnnoTool('none')
+    setSelectedAnnoId(null); setDraftAnno(null); setLiveEditAnno(null); setTextEditing(null); setAnnoTool('none')
   }
 
   // Draws every committed annotation onto an export-resolution context, scaled from
@@ -1063,6 +1540,13 @@ export default function ImageEditorModal({
       loadSrc(ev.target.result)
       toast?.('New image loaded — click Save to confirm')
     }
+    // Without this, a failed read (corrupted file, OS permission error, storage/quota
+    // issue) left the just-pushed history entry orphaned and gave the user no feedback at
+    // all — clicking "Replace Image" would just silently appear to do nothing.
+    reader.onerror = () => {
+      setImageHistory(h => h.slice(0, -1))
+      toast?.('Could not read that file', true)
+    }
     reader.readAsDataURL(file)
     e.target.value = ''
   }
@@ -1072,7 +1556,18 @@ export default function ImageEditorModal({
     if (!cr || cr.w < 4 || cr.h < 4) { toast?.('Draw a crop area first', true); return }
 
     pushImageHistory()
+    try {
+      applyCropInternal(cr)
+    } catch (err) {
+      // Without this, a throw anywhere in the canvas work below (e.g. a SecurityError from
+      // a tainted canvas) left the just-pushed history entry orphaned — Undo would point at
+      // a crop that never actually applied — and the user saw no error message at all.
+      setImageHistory(h => h.slice(0, -1))
+      toast?.(err?.message || 'Could not apply crop', true)
+    }
+  }
 
+  const applyCropInternal = (cr) => {
     const { slideW, slideH } = getSlideSize()
     // Export at native image resolution so crop never loses quality
     const EXPORT_SIZE  = Math.max(naturalW, naturalH, 1200)
@@ -1132,7 +1627,19 @@ export default function ImageEditorModal({
   const handleSave = async (target = 'default') => {
     if (!sourceImgRef.current) { toast?.('No image loaded', true); return }
     setSaving(true)
+    try {
+      await exportAndSave(target)
+    } catch (err) {
+      // Without this, a synchronous throw anywhere in the export pipeline (e.g. a
+      // SecurityError from a cross-origin image whose host doesn't send permissive CORS
+      // headers, tainting the canvas) left `saving` stuck true forever — the Save button
+      // showed "Saving…" indefinitely with no way to retry and no error shown.
+      setSaving(false)
+      toast?.(err?.message || 'Could not save image', true)
+    }
+  }
 
+  const exportAndSave = async (target) => {
     const img = sourceImgRef.current  // ✅ use ref, not stale state
     const nW  = img.naturalWidth      // ✅ always fresh
     const nH  = img.naturalHeight
@@ -1207,8 +1714,28 @@ export default function ImageEditorModal({
       if (!blob) { toast?.('Could not export image', true); return }
       onClose?.()
       const save = target === 'replace' ? onSaveReplace : target === 'copy' ? onSaveAsCopy : onSave
-      save(blob).catch(err => toast?.(err.message, true))
+      // Deferring the call through .then() (rather than calling save(blob) directly) means
+      // ANY failure — a synchronous throw, or save() not returning a promise at all because
+      // a caller passed a plain sync function instead of the documented async (blob) => void
+      // — becomes a caught rejection here instead of an uncaught TypeError/exception inside
+      // this toBlob callback. Two of this component's callers currently pass non-async
+      // onSave handlers, which previously crashed on `.catch()` of undefined every time.
+      Promise.resolve().then(() => save(blob)).catch(err => toast?.(err?.message || 'Could not save image', true))
     }, 'image/png')
+  }
+
+  // The currently-selected annotation, when in Move mode — used so the toolbar's color/width
+  // controls can re-edit an EXISTING shape's properties, not just set defaults for the next
+  // one drawn. Gated on annoTool === 'none' so a stale selectedAnnoId left over from before
+  // switching to a drawing tool doesn't cause color/width changes to hit the wrong target.
+  // Text is excluded — it already has its own dedicated re-edit flow via double-click.
+  const selectedAnno = (annoTool === 'none' && selectedAnnoId)
+    ? annotations.find(a => a.id === selectedAnnoId && a.type !== 'text')
+    : null
+
+  const updateSelectedAnno = (patch) => {
+    if (!selectedAnnoId) return
+    commitAnnotations(annotationsRef.current.map(a => a.id === selectedAnnoId ? { ...a, ...patch } : a))
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1217,19 +1744,15 @@ export default function ImageEditorModal({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] bg-black/50"
-      style={{ display: 'flex', alignItems: 'stretch' }}
+      className="fixed inset-0 z-[9999] bg-black/50 flex flex-col sm:flex-row items-stretch"
       onPointerDown={e => e.stopPropagation()}
       onClick={e => e.stopPropagation()}
       onKeyDown={e => e.stopPropagation()}
     >
-      {/* ── Left sidebar — always visible ────────────────────────────────── */}
+      {/* ── Left rail — desktop only. Phones get the doc-scanner chrome further down ─── */}
       <div
-        className="flex flex-col bg-white border-r-2 border-gray-400 flex-shrink-0 overflow-y-auto"
-        style={{ width: 200 }}
+        className="hidden sm:flex sm:flex-col bg-white border-r-2 border-gray-400 flex-shrink-0 overflow-y-auto sm:w-[200px]"
       >
-        {/* Header — fixed height matches the annotation toolbar's row height so their
-            bottom borders land on the same line instead of stair-stepping */}
         <div className="h-[58px] flex items-center justify-between px-4 border-b-2 border-gray-400 flex-shrink-0">
           <span className="text-[11px] font-semibold text-gray-800 uppercase tracking-widest">Edit Image</span>
           <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-400 bg-gray-100 text-gray-700 hover:bg-gray-200 hover:border-gray-500 hover:scale-110 active:bg-gray-300 active:scale-95 transition-all">
@@ -1299,7 +1822,7 @@ export default function ImageEditorModal({
           <Section label="Crop">
             <SideBtn
               active={cropMode}
-              onClick={() => { setCropMode(v => !v); setCropRect(null); setAnnoTool('none') }}
+              onClick={() => { abortAnnoGesture(); setCropMode(v => !v); setCropRect(null); setAnnoTool('none') }}
               full
             >
               ✂ {cropMode ? 'Cancel Crop' : 'Start Crop'}
@@ -1401,26 +1924,24 @@ export default function ImageEditorModal({
         </div>
       </div>
 
-      {/* ── Canvas area ─────────────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-w-0">
+      {/* ── Canvas area — image in the middle, fills the screen on phones ──────── */}
+      <div className="order-1 sm:order-2 flex flex-col flex-1 min-w-0 min-h-0">
 
-        {/* Annotation toolbar — top. min-h (not h) matches the sidebar header's height so the
-            two bottom borders land on the same line, but still lets the row grow if the color
-            swatches / font controls wrap onto a second line on a narrower window. */}
-        <div className="min-h-[58px] flex items-center gap-1 px-3 py-2 border-b-2 border-gray-400 bg-white flex-shrink-0 flex-wrap">
+        {/* Annotation toolbar — desktop only. Phones use the bottom doc-scanner bar. */}
+        <div className="hidden sm:flex min-h-[58px] items-center gap-1 px-3 py-2 border-b-2 border-gray-400 bg-white flex-shrink-0 flex-wrap">
           {ANNOTATION_TOOLS.map(t => (
             <button
               key={t.key}
               type="button"
               title={t.title}
-              onClick={() => { if (textEditing) commitTextEditing(); setCropMode(false); setShapesMenuOpen(false); setAnnoTool(v => v === t.key ? 'none' : t.key) }}
+              onClick={() => { abortAnnoGesture(); if (textEditing) commitTextEditing(); setCropMode(false); setShapesMenuOpen(false); setAnnoTool(v => v === t.key ? 'none' : t.key) }}
               className={`flex-shrink-0 flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-md border transition-all
                 ${annoTool === t.key
                   ? 'bg-[#7b68ee] border-[#7b68ee] text-white'
                   : 'bg-gray-100 border-gray-400 text-black hover:bg-gray-200 hover:border-gray-500 hover:scale-105 active:bg-gray-300 active:scale-95'}`}
             >
               {t.icon}
-              <span className="text-[8px] font-bold uppercase tracking-[.04em] leading-none whitespace-nowrap">{t.label}</span>
+              <span className="text-[8px] font-bold uppercase tracking-[.04em] leading-none whitespace-nowrap select-none">{t.label}</span>
             </button>
           ))}
 
@@ -1436,7 +1957,7 @@ export default function ImageEditorModal({
                   : 'bg-gray-100 border-gray-400 text-black hover:bg-gray-200 hover:border-gray-500 hover:scale-105 active:bg-gray-300 active:scale-95'}`}
             >
               <ShapesIcon />
-              <span className="text-[8px] font-bold uppercase tracking-[.04em] leading-none whitespace-nowrap">Shapes</span>
+              <span className="text-[8px] font-bold uppercase tracking-[.04em] leading-none whitespace-nowrap select-none">Shapes</span>
             </button>
             {shapesMenuOpen && (
               <div className="absolute left-0 top-full mt-1 grid grid-cols-3 gap-1 p-2 bg-white border-2 border-gray-400 rounded-md shadow-xl z-20 w-[124px]">
@@ -1445,7 +1966,7 @@ export default function ImageEditorModal({
                     key={s.key}
                     type="button"
                     title={s.title}
-                    onClick={() => { setAnnoTool(s.key); setShapesMenuOpen(false) }}
+                    onClick={() => { abortAnnoGesture(); setAnnoTool(s.key); setShapesMenuOpen(false) }}
                     className={`w-8 h-8 flex items-center justify-center rounded-md border text-[14px] transition-all
                       ${annoTool === s.key
                         ? 'bg-[#7b68ee] border-[#7b68ee] text-white'
@@ -1484,8 +2005,10 @@ export default function ImageEditorModal({
             >Clear all</button>
           )}
 
-          {/* Colors — relevant once a drawing tool is active, or while re-editing an existing text box */}
-          {(annoTool !== 'none' || textEditing?.editingId) && (
+          {/* Colors — relevant once a drawing tool is active, while re-editing an existing
+              text box, or while a non-text shape is selected (re-colors THAT shape instead
+              of just setting the default for the next one drawn). */}
+          {(annoTool !== 'none' || textEditing?.editingId || selectedAnno) && (
             <div className="contents" onMouseDown={() => { toolbarInteractionRef.current = true }}>
               <div className="w-px h-6 bg-gray-200 mx-1 flex-shrink-0" />
               {ANNOTATION_COLORS.map(c => (
@@ -1493,29 +2016,51 @@ export default function ImageEditorModal({
                   key={c}
                   type="button"
                   title={c}
-                  onClick={() => setAnnoColor(c)}
-                  className={`w-5 h-5 rounded-full border-2 flex-shrink-0 transition-transform hover:scale-110 active:scale-95 ${annoColor === c ? 'border-[#7b68ee] scale-110' : 'border-white hover:border-gray-400'}`}
+                  onClick={() => selectedAnno ? updateSelectedAnno({ color: c }) : setAnnoColor(c)}
+                  className={`w-5 h-5 rounded-full border-2 flex-shrink-0 transition-transform hover:scale-110 active:scale-95 ${(selectedAnno ? selectedAnno.color : annoColor) === c ? 'border-[#7b68ee] scale-110' : 'border-white hover:border-gray-400'}`}
                   style={{ background: c, boxShadow: '0 0 0 1px rgba(0,0,0,.3)' }}
                 />
               ))}
               <input
                 type="color"
-                value={annoColor}
-                onChange={e => setAnnoColor(e.target.value)}
+                value={selectedAnno ? selectedAnno.color : annoColor}
+                onChange={e => selectedAnno ? updateSelectedAnno({ color: e.target.value }) : setAnnoColor(e.target.value)}
                 title="Custom color"
                 className="w-5 h-5 rounded-full border border-gray-400 hover:border-gray-500 cursor-pointer p-0 bg-transparent flex-shrink-0 transition-colors"
               />
             </div>
           )}
 
-          {/* Stroke width — pen / highlighter / shapes */}
-          {annoTool !== 'none' && annoTool !== 'text' && (
+          {/* Stroke width — pen / highlighter / shapes, or a selected non-text annotation.
+              For a selected shape, dragging previews via liveEditAnno (same mechanism as
+              resize/move) and only commits one undo-history entry on release — committing on
+              every onChange tick would otherwise spam the undo stack with every intermediate
+              value dragged through. */}
+          {((annoTool !== 'none' && annoTool !== 'text') || selectedAnno) && (
             <div className="flex items-center gap-1.5 flex-shrink-0 ml-1">
-              <span className="text-[9px] font-bold uppercase tracking-widest text-black whitespace-nowrap">{annoWidth}px</span>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-black whitespace-nowrap">
+                {selectedAnno ? (liveEditAnno?.id === selectedAnno.id ? liveEditAnno.width : selectedAnno.width) : annoWidth}px
+              </span>
               <input
                 type="range" min={1} max={24} step={1}
-                value={annoWidth}
-                onChange={e => setAnnoWidth(parseInt(e.target.value))}
+                value={selectedAnno ? (liveEditAnno?.id === selectedAnno.id ? liveEditAnno.width : selectedAnno.width) : annoWidth}
+                onChange={e => {
+                  const width = parseInt(e.target.value)
+                  if (selectedAnno) setLiveEditAnno({ ...selectedAnno, width })
+                  else setAnnoWidth(width)
+                }}
+                onMouseUp={() => {
+                  if (selectedAnno && liveEditAnno?.id === selectedAnno.id) {
+                    commitAnnotations(annotationsRef.current.map(a => a.id === selectedAnno.id ? liveEditAnno : a))
+                    setLiveEditAnno(null)
+                  }
+                }}
+                onTouchEnd={() => {
+                  if (selectedAnno && liveEditAnno?.id === selectedAnno.id) {
+                    commitAnnotations(annotationsRef.current.map(a => a.id === selectedAnno.id ? liveEditAnno : a))
+                    setLiveEditAnno(null)
+                  }
+                }}
                 className="w-20 accent-[#7b68ee] cursor-pointer"
               />
             </div>
@@ -1547,14 +2092,95 @@ export default function ImageEditorModal({
               />
             </div>
           )}
+
+          {/* Loupe — a floating cursor-following magnifier, independent of the tool/viewZoom,
+              for checking fine detail (small text, texture) without changing the actual
+              zoom level of the whole canvas. */}
+          <button
+            type="button"
+            title="Loupe (magnifier)"
+            onClick={() => { setLoupeOn(v => !v); setLoupePos(null); setLoupeLocked(false) }}
+            className={`flex items-center justify-center flex-col gap-0.5 px-2.5 py-1.5 rounded-md border transition-all flex-shrink-0 ml-auto
+              ${loupeOn
+                ? 'bg-[#7b68ee] border-[#7b68ee] text-white'
+                : 'bg-gray-100 border-gray-400 text-black hover:bg-gray-200 hover:border-gray-500 hover:scale-105 active:bg-gray-300 active:scale-95'}`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+            </svg>
+            <span className="text-[8px] font-bold uppercase tracking-[.04em] leading-none whitespace-nowrap select-none">Loupe</span>
+          </button>
+          {loupeOn && (
+            <div className="flex items-center gap-0 rounded-full border border-gray-400 bg-gray-100 overflow-hidden flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setLoupeZoom(z => Math.max(2, z - 1))}
+                className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 text-black text-base font-bold cursor-pointer border-none bg-transparent transition-colors select-none"
+                title="Less magnification"
+              >−</button>
+              <span className="text-[11px] font-bold text-black tabular-nums px-1.5 select-none">{loupeZoom}×</span>
+              <button
+                type="button"
+                onClick={() => setLoupeZoom(z => Math.min(8, z + 1))}
+                className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 text-black text-base font-bold cursor-pointer border-none bg-transparent transition-colors select-none"
+                title="More magnification"
+              >+</button>
+            </div>
+          )}
+
+          {/* Viewport zoom — same interaction as the fullscreen image viewer's zoom bar
+              (hold −/+ to repeat, click the % to reset), but a pure CSS scale on the canvas
+              stack here rather than baked into the exported image. Pinned to the right end
+              of this toolbar row regardless of how many tool controls precede it. */}
+          <div className="flex items-center gap-0 rounded-full border border-gray-400 bg-gray-100 overflow-hidden flex-shrink-0">
+            <button
+              type="button"
+              onMouseDown={() => { const step = () => setViewZoom(z => clampViewZoom(z - 0.1)); step(); viewZoomHoldRef.current = setInterval(step, 120) }}
+              onMouseUp={() => clearInterval(viewZoomHoldRef.current)}
+              onMouseLeave={() => clearInterval(viewZoomHoldRef.current)}
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 text-black text-base font-bold cursor-pointer border-none bg-transparent transition-colors select-none"
+              title="Zoom out"
+            >−</button>
+            <span
+              onClick={() => setViewZoom(1)}
+              className="text-[11px] font-bold text-black tabular-nums px-1.5 cursor-pointer select-none"
+              title="Click to reset"
+            >{Math.round(viewZoom * 100)}%</span>
+            <button
+              type="button"
+              onMouseDown={() => { const step = () => setViewZoom(z => clampViewZoom(z + 0.1)); step(); viewZoomHoldRef.current = setInterval(step, 120) }}
+              onMouseUp={() => clearInterval(viewZoomHoldRef.current)}
+              onMouseLeave={() => clearInterval(viewZoomHoldRef.current)}
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 text-black text-base font-bold cursor-pointer border-none bg-transparent transition-colors select-none"
+              title="Zoom in"
+            >+</button>
+          </div>
         </div>
 
         <div
           ref={wrapRef}
-          className="flex items-center justify-center overflow-auto flex-1"
+          className="relative flex items-center justify-center overflow-auto flex-1"
           style={{ background: 'repeating-conic-gradient(#e8e8e8 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px' }}
+          onMouseMove={handleLoupeMouseMove}
+          onMouseLeave={() => { if (!loupeLocked) setLoupePos(null) }}
+          onClick={handleWrapClick}
+          onDoubleClick={handleWrapDoubleClick}
         >
-        <div ref={slideRef} className="relative flex-shrink-0">
+        {/* Loupe floating preview — a sibling of slideRef (not a child), positioned using
+            raw screen coordinates relative to this wrapper, so it renders at a constant
+            on-screen size regardless of whatever viewZoom is currently applied to the slide. */}
+        {loupeOn && loupePos && (
+          <div
+            className="absolute bg-white border-2 border-gray-400 rounded-md shadow-xl overflow-hidden"
+            style={{ left: loupePos.screen.x, top: loupePos.screen.y, width: LOUPE_SIZE, zIndex: 40, pointerEvents: 'none' }}
+          >
+            <div className="px-2 py-1 bg-gray-100 border-b border-gray-300 text-[9px] font-bold uppercase tracking-widest text-gray-700">
+              Loupe — {loupeZoom}×
+            </div>
+            <canvas ref={loupeCanvasRef} style={{ width: LOUPE_SIZE, height: LOUPE_SIZE, display: 'block' }} />
+          </div>
+        )}
+        <div ref={slideRef} className="relative flex-shrink-0" style={{ transform: `scale(${viewZoom})` }}>
           {/* Main canvas — slide content */}
           <canvas
             ref={canvasRef}
@@ -1572,10 +2198,11 @@ export default function ImageEditorModal({
             onMouseDown={handleCropMouseDown}
             onMouseMove={handleCropMouseMove}
             onMouseUp={handleCropMouseUp}
-            onMouseLeave={() => { isDraggingRef.current = false }}
+            onMouseLeave={() => { isDraggingRef.current = false; canvasRectRef.current = null }}
             onTouchStart={handleCropMouseDown}
             onTouchMove={handleCropMouseMove}
             onTouchEnd={handleCropMouseUp}
+            onTouchCancel={handleCropMouseUp}
           />
           {/* Annotation overlay canvas */}
           <canvas
@@ -1594,6 +2221,14 @@ export default function ImageEditorModal({
             onTouchStart={handleAnnoMouseDown}
             onTouchMove={handleAnnoMouseMove}
             onTouchEnd={handleAnnoMouseUp}
+            onTouchCancel={handleAnnoMouseUp}
+          />
+          {/* Live-draw overlay — visual only, sits above the interactive annotation canvas
+              and repaints just the one shape currently being drawn/moved/resized. */}
+          <canvas
+            ref={draftCanvasRef}
+            className="absolute top-0 left-0"
+            style={{ pointerEvents: 'none' }}
           />
           {/* Inline text annotation input */}
           {textEditing && (
@@ -1689,6 +2324,167 @@ export default function ImageEditorModal({
             </div>
           )}
         </div>
+        </div>
+      </div>
+
+      {/* ── Mobile doc-scanner chrome — big image above, tool bar + footer here ──── */}
+      <div className="sm:hidden order-2 flex flex-col bg-white border-t-2 border-gray-400 flex-shrink-0">
+
+        {/* Crop confirm strip */}
+        {cropMode && (
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-gray-200 bg-[#f4f2ff]">
+            <span className="text-[11px] text-gray-700">{cropRect ? `${Math.round(cropRect.w)} × ${Math.round(cropRect.h)} px` : 'Drag on the image to select an area'}</span>
+            {cropRect && <button onClick={handleApplyCrop} className="px-3 py-1 rounded-md text-[12px] font-semibold bg-[#7b68ee] text-white active:scale-95 transition-transform flex-shrink-0">Apply</button>}
+          </div>
+        )}
+
+        {/* Contextual controls for the active tool / selection — colour, stroke width, font,
+            and the shape picker. Mirrors the desktop annotation toolbar's inline controls. */}
+        {(annoTool !== 'none' || textEditing?.editingId || selectedAnno || shapesMenuOpen) && (
+          <div className="flex flex-col gap-2 px-3 py-2 border-b border-gray-200">
+
+            {/* Shape picker */}
+            {shapesMenuOpen && (
+              <div data-shapes-menu className="flex gap-1 overflow-x-auto">
+                {SHAPE_TOOLS.map(s => (
+                  <button key={s.key} type="button" title={s.title}
+                    onClick={() => { abortAnnoGesture(); setAnnoTool(s.key); setShapesMenuOpen(false) }}
+                    className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-md border text-[15px] transition-all active:scale-95
+                      ${annoTool === s.key ? 'bg-[#7b68ee] border-[#7b68ee] text-white' : 'bg-gray-100 border-gray-300 text-black'}`}>
+                    {s.icon}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Colour */}
+            {(annoTool !== 'none' || textEditing?.editingId || selectedAnno) && (
+              <div className="flex items-center gap-2 overflow-x-auto">
+                {ANNOTATION_COLORS.map(c => (
+                  <button key={c} type="button" onClick={() => selectedAnno ? updateSelectedAnno({ color: c }) : setAnnoColor(c)} style={{ background: c, boxShadow: '0 0 0 1px rgba(0,0,0,.25)' }}
+                    className={`w-6 h-6 rounded-full flex-shrink-0 border-2 transition-transform ${(selectedAnno ? selectedAnno.color : annoColor) === c ? 'border-[#7b68ee] scale-110' : 'border-white'}`} />
+                ))}
+                <input type="color" value={selectedAnno ? selectedAnno.color : annoColor}
+                  onChange={e => selectedAnno ? updateSelectedAnno({ color: e.target.value }) : setAnnoColor(e.target.value)}
+                  className="w-6 h-6 rounded-full border border-gray-400 p-0 bg-transparent flex-shrink-0" />
+              </div>
+            )}
+
+            {/* Stroke width — pen / highlighter / shapes / selected non-text */}
+            {((annoTool !== 'none' && annoTool !== 'text') || selectedAnno) && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-700 w-9 flex-shrink-0">
+                  {selectedAnno ? (liveEditAnno?.id === selectedAnno.id ? liveEditAnno.width : selectedAnno.width) : annoWidth}px
+                </span>
+                <input type="range" min={1} max={24} step={1}
+                  value={selectedAnno ? (liveEditAnno?.id === selectedAnno.id ? liveEditAnno.width : selectedAnno.width) : annoWidth}
+                  onChange={e => { const w = parseInt(e.target.value); if (selectedAnno) setLiveEditAnno({ ...selectedAnno, width: w }); else setAnnoWidth(w) }}
+                  onTouchEnd={() => { if (selectedAnno && liveEditAnno?.id === selectedAnno.id) { commitAnnotations(annotationsRef.current.map(a => a.id === selectedAnno.id ? liveEditAnno : a)); setLiveEditAnno(null) } }}
+                  className="flex-1 accent-[#7b68ee]" />
+              </div>
+            )}
+
+            {/* Font family + size — text */}
+            {(annoTool === 'text' || textEditing?.editingId) && (
+              <div className="flex items-center gap-2">
+                <select value={annoFontFamily} onChange={e => setAnnoFontFamily(e.target.value)} style={{ fontFamily: annoFontFamily }}
+                  className="bg-white border border-gray-400 text-black text-[11px] px-1.5 py-1 rounded-md outline-none flex-shrink-0">
+                  {FONT_FAMILIES.map(f => <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>)}
+                </select>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-700 w-9 flex-shrink-0">{annoFontSize}px</span>
+                <input type="range" min={10} max={96} step={1} value={annoFontSize} onChange={e => setAnnoFontSize(parseInt(e.target.value))} className="flex-1 accent-[#7b68ee]" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tool bar — scrolls left ⇄ right */}
+        <div className="flex items-stretch gap-0.5 px-1.5 py-1.5 overflow-x-auto">
+          {[
+            { label: 'Crop',   active: cropMode,            on: () => { abortAnnoGesture(); setCropMode(v => !v); setCropRect(null); setAnnoTool('none') }, ic: <><rect x="7" y="3" width="14" height="14" rx="1"/><path d="M3 7h4M7 21v-4"/></> },
+            { label: 'Rotate', on: () => { setRotation(r => (r + 90) % 360); setCropRect(null) }, ic: <><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></> },
+            { label: 'Flip H', active: flipH, on: () => setFlipH(v => !v), ic: <><path d="M12 3v18M7 8l-4 4 4 4M17 8l4 4-4 4"/></> },
+            { label: 'Flip V', active: flipV, on: () => setFlipV(v => !v), ic: <><path d="M3 12h18M8 7L12 3l4 4M8 17l4 4 4-4"/></> },
+            ...ANNOTATION_TOOLS.map(t => ({ label: t.label, active: annoTool === t.key, on: () => { abortAnnoGesture(); if (textEditing) commitTextEditing(); setCropMode(false); setAnnoTool(v => v === t.key ? 'none' : t.key) }, node: t.icon })),
+            { label: 'Shapes', shapesMenu: true, active: shapesMenuOpen || SHAPE_TOOLS.some(s => s.key === annoTool), on: () => { if (textEditing) commitTextEditing(); setCropMode(false); setShapesMenuOpen(v => !v) }, ic: <><rect x="3" y="3" width="8" height="8" rx="1"/><circle cx="17" cy="7" r="4"/><path d="M7 15l-4 6h8z"/></> },
+            { label: 'Remarks', active: remarksEditing, on: () => setRemarksEditing(v => !v), ic: <><path d="M4 5h16M4 12h16M4 19h10"/></> },
+            { label: 'Undo', disabled: !annoHistory.length && !imageHistory.length, on: () => annoHistory.length ? handleUndoAnno() : handleUndoImage(), ic: <><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></> },
+            { label: 'Redo', disabled: !annoFuture.length && !imageFuture.length, on: () => annoFuture.length ? handleRedoAnno() : handleRedoImage(), ic: <><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></> },
+            { label: 'Reset', on: handleReset, ic: <><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-7 3.3"/><path d="M3 4v4h4"/></> },
+          ].map(b => (
+            <button
+              key={b.label}
+              type="button"
+              {...(b.shapesMenu ? { 'data-shapes-menu': '' } : {})}
+              onClick={b.on}
+              disabled={b.disabled}
+              className={`flex flex-col items-center justify-center gap-1 flex-shrink-0 min-w-[60px] px-1.5 py-1 rounded-md text-[9px] font-semibold uppercase tracking-[.03em] transition-all active:scale-95 disabled:opacity-35
+                ${b.active ? 'bg-[#7b68ee]/10 text-[#7b68ee]' : 'text-gray-700 active:bg-gray-100'}`}
+            >
+              {b.node || (
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{b.ic}</svg>
+              )}
+              <span className="leading-none whitespace-nowrap">{b.label}</span>
+            </button>
+          ))}
+          {/* Ratio + Replace as native controls */}
+          <label className="flex flex-col items-center justify-center gap-1 flex-shrink-0 min-w-[60px] px-1.5 py-1 rounded-md text-[9px] font-semibold uppercase tracking-[.03em] text-gray-700 active:bg-gray-100 active:scale-95 transition-all">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 10h18"/></svg>
+            <select value={slideRatio} onChange={e => { setSlideRatio(e.target.value); setCropRect(null) }} className="text-[9px] font-semibold bg-transparent outline-none text-center appearance-none">
+              {['1:1','4:3','3:4','16:9','9:16','3:2','2:3','free'].map(r => <option key={r} value={r}>{r === 'free' ? 'FREE' : r}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col items-center justify-center gap-1 flex-shrink-0 min-w-[60px] px-1.5 py-1 rounded-md text-[9px] font-semibold uppercase tracking-[.03em] text-gray-700 active:bg-gray-100 active:scale-95 transition-all cursor-pointer">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
+            <span className="leading-none whitespace-nowrap">Replace</span>
+            <input type="file" accept="image/*" className="hidden" onChange={handleReplaceFile} />
+          </label>
+        </div>
+
+        {/* Footer — cancel · title · done */}
+        <div className="relative flex items-center justify-between px-4 py-2 border-t border-gray-200">
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full text-gray-700 active:bg-gray-100 active:scale-90 transition-all">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <span className="text-[12px] font-semibold text-gray-800 uppercase tracking-wider">Edit Image</span>
+
+          {/* Copy / Replace chooser — only when the caller offers both */}
+          {mobSaveMenu && dualSaveMode && (
+            <>
+              <div className="fixed inset-0 z-[1]" onClick={() => setMobSaveMenu(false)} />
+              <div className="absolute right-3 bottom-full mb-2 z-[2] bg-white border-2 border-gray-400 rounded-lg shadow-xl overflow-hidden min-w-[190px]">
+                <button
+                  onClick={() => { setMobSaveMenu(false); handleSave('copy') }}
+                  disabled={saving}
+                  className="w-full px-4 py-3 text-left text-[13px] font-semibold text-[#534AB7] active:bg-[#7b68ee]/10 disabled:opacity-50"
+                >
+                  Save as Copy
+                </button>
+                <div className="h-px bg-gray-200" />
+                <button
+                  onClick={() => { setMobSaveMenu(false); handleSave('replace') }}
+                  disabled={saving || replaceDisabled}
+                  title={replaceDisabled ? replaceDisabledReason : undefined}
+                  className="w-full px-4 py-3 text-left text-[13px] font-semibold text-gray-800 active:bg-gray-100 disabled:opacity-40"
+                >
+                  Replace Original
+                </button>
+              </div>
+            </>
+          )}
+
+          <button
+            onClick={() => dualSaveMode ? setMobSaveMenu(v => !v) : handleSave(copyOnlyMode ? 'copy' : 'default')}
+            disabled={saving}
+            title={dualSaveMode ? 'Save as Copy or Replace Original' : undefined}
+            className="w-9 h-9 flex items-center justify-center rounded-full text-[#7b68ee] active:bg-[#7b68ee]/10 active:scale-90 transition-all disabled:opacity-40"
+          >
+            {saving ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="animate-spin"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" strokeDasharray="42 14" strokeLinecap="round"/></svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            )}
+          </button>
         </div>
       </div>
     </div>

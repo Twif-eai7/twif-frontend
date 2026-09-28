@@ -5,7 +5,34 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Twif</title>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Supabase project origin — serves both the REST API (every catalog/workspace fetch) and
+         Storage (every SKU image). Without this hint, the browser only starts the DNS/TCP/TLS
+         handshake once the JS bundle has loaded AND made its first request, adding that latency
+         serially before the first fetch — and therefore before the LCP image — can even start. -->
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" />
+    </noscript>
+    <!-- Text fonts — moved here (as a non-blocking link) from index.css's @import statements,
+         which are always render-blocking regardless of how the stylesheet that contains them is
+         loaded. Combined into one request instead of three separate Google Fonts round trips. -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=Figtree:wght@400;500;600&family=Dancing+Script:wght@500;700&display=optional"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=Figtree:wght@400;500;600&family=Dancing+Script:wght@500;700&display=optional" />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

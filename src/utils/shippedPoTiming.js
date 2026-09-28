@@ -41,7 +41,13 @@ export function parseTargetDate(value) {
   }
 
   const d = new Date(str)
-  return isNaN(d.getTime()) ? null : d
+  if (isNaN(d.getTime())) return null
+  // A plain-date target is a deadline through the end of that day, not its
+  // first instant — otherwise a final_date on the same calendar day but with
+  // any non-zero time-of-day (e.g. a Postgres timestamp) would compare as
+  // "after" a target parsed at midnight and register as late.
+  d.setHours(23, 59, 59, 999)
+  return d
 }
 
 /** Matches Shipped PO Summary "On Time" — shipped on or before target. */

@@ -57,7 +57,10 @@ export default function CourierSearchSelect({ label, required, value, onChange, 
   const startEditing = () => {
     setEditing(true)
     setOpen(true)
-    setQuery(value || '')
+    // Empty, not `value` — pre-filling with the already-picked courier's full name made the
+    // startsWith filter below match almost nothing but itself, so reopening the dropdown to
+    // pick something else showed just the one already selected instead of the full list.
+    setQuery('')
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
@@ -131,7 +134,7 @@ export default function CourierSearchSelect({ label, required, value, onChange, 
           />
         )}
         {open && filtered.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-[200] max-h-[220px] overflow-y-auto">
+          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-[200] max-h-[220px] overflow-y-auto overflow-x-hidden">
             {filtered.map((name, i) => (
               <button key={name} type="button"
                 ref={el => { itemRefs.current[i] = el }}

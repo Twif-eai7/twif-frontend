@@ -2,6 +2,7 @@ import { usePoStore } from '../stores/poStore'
 import { useProfileStore } from '../stores/profileStore'
 import { useAuthStore } from '../stores/authStore'
 import { supabase } from '../lib/supabase'
+import { impliedRateFor } from '../components/orderManagement/poUtils'
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL
 
@@ -77,6 +78,17 @@ export function usePOActions() {
     if (amountUsd != null) fd.append('amountUsd', String(amountUsd))
     const result = await apiFormData(`/purchase-orders/confirm/${poId}?updatedBy=${encodeURIComponent(memberId)}`, fd)
     _updateRow(poId, { pi_received_date: piReceivedDate, ex_factory_date: exFactoryDate })
+    return result
+  }
+
+  // ── Attach/replace product details file standalone ───────────────────────
+  // For when it wasn't provided during the original PI upload — see
+  // shopify-backend/routes/purchaseOrders.js's PUT /product-details/:poId.
+  const uploadProductDetails = async (poId, file) => {
+    const fd = new FormData()
+    fd.append('productDetailsFile', file)
+    const result = await apiFormData(`/purchase-orders/product-details/${poId}`, fd, 'PUT')
+    _updateRow(poId, { product_details_file_url: result.product_details_file_url })
     return result
   }
 
@@ -164,6 +176,31 @@ export function usePOActions() {
     return json
   }
 
+  // ── Submit advance payment ─────────────────────────────────────────────────
+  // Append-only — see sql/po_advance_payments.sql. Currency and its USD rate
+  // are both derived from the PO itself (impliedRateFor, same helper
+  // PoDrawer.jsx's own line-item value checks use) rather than a live FX
+  // lookup — an advance is always in the PO's own currency, and pricing it
+  // at today's market rate instead of the rate the PO was actually booked at
+  // would make "advance received" and "PO value" incomparable in USD.
+  const submitAdvancePayment = async (po, { amount, paymentDate, referenceNumber, notes }) => {
+    const rate = impliedRateFor(po)
+    if (rate == null) throw new Error("Can't determine this PO's USD conversion rate — check its amount/currency fields.")
+    const { error } = await supabase
+      .from('po_advance_payments')
+      .insert([{
+        po_id: po.id,
+        amount: parseFloat(amount),
+        currency: po.currency || 'USD',
+        amount_usd: parseFloat(amount) * rate,
+        payment_date: paymentDate,
+        reference_number: referenceNumber?.trim() || null,
+        notes: notes?.trim() || null,
+        submitted_by: memberId,
+      }])
+    if (error) throw new Error(error.message)
+  }
+
   // ── Delete PO (soft delete via delete_meta) ───────────────────────────────
   const deletePO = async (poId, reason) => {
     const { error } = await supabase
@@ -182,5 +219,5 @@ export function usePOActions() {
     if (error) throw new Error(error.message)
   }
 
-  return { createPO, updatePO, uploadPI, revisePO, confirmPI, markErpSynced, bulkMarkErpSynced, addPiDelayComment, deletePO, reportOtifException }
+  return { createPO, updatePO, uploadPI, revisePO, confirmPI, markErpSynced, bulkMarkErpSynced, addPiDelayComment, deletePO, reportOtifException, uploadProductDetails, submitAdvancePayment }
 }

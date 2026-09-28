@@ -373,7 +373,7 @@ function S6QA() {
           ["QA Score Card",          "Coming soon — will show QA scores by order and supplier."],
           ["FTPR Summary",           "First Time Pass Rate summary for your orders. Tracks how many inspections pass on the first attempt."],
           ["Supplier Audit Summary", "Results of audits conducted at supplier factories."],
-          ["IRF",                    "Inspection Request Form — submit a request for a product inspection via Google Form (opens in new tab)."],
+          ["IRF",                    "Inspection Request Form — submit a request for a product inspection. Submitting adds a Requested entry to the Inspection Schedule calendar, where QA assigns an inspector to confirm it."],
         ]}
       />
     </Section>

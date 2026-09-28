@@ -70,6 +70,10 @@ export function getCategory(alert) {
   if (type === 'PO_REVISION')            return 'revision'
   if (type === 'PO_UPDATE')              return 'updated'
   if (type === 'PO_UPLOAD')              return 'po'
+  if (type === 'PRODUCT_SHEET_UPDATE')   return 'product_sheet'
+  if (type === 'PI_SHEET_PARSED')        return 'pi_sheet'
+  if (type === 'OTIF_EXCEPTION')         return 'otif_exception'
+  if (type === 'QUANTITY_CANCELLATION')  return 'cancellation'
   if (type.startsWith('INSPECTION'))       return 'inspection'
   const msg = (alert.message || '').toLowerCase()
   if (msg.includes('overdue'))                                    return 'overdue'
@@ -90,6 +94,11 @@ export function resolvePO(alert) {
     reason:     s.delete_meta.reason         || null,
   }
   return s
+}
+
+export function isExceptionRequest(alert) {
+  const cat = getCategory(alert)
+  return cat === 'otif_exception' || cat === 'cancellation'
 }
 
 export function hasUpdates(alert) {
@@ -126,11 +135,16 @@ function filterAlerts(alerts, isAdmin, filter, query) {
   let list = [...alerts]
 
   if (!isAdmin) {
-    list = list.filter(a => ['reminder', 'overdue', 'delay', 'inspection'].includes(getCategory(a)))
+    list = list.filter(a => ['reminder', 'overdue', 'delay', 'inspection', 'product_sheet', 'pi_sheet', 'otif_exception', 'cancellation'].includes(getCategory(a)))
     if      (filter === 'reminder')   list = list.filter(a => getCategory(a) === 'reminder')
     else if (filter === 'overdue')    list = list.filter(a => getCategory(a) === 'overdue')
     else if (filter === 'delay')      list = list.filter(a => getCategory(a) === 'delay')
     else if (filter === 'inspection') list = list.filter(a => getCategory(a) === 'inspection')
+    else if (filter === 'product_sheet') list = list.filter(a => getCategory(a) === 'product_sheet')
+    else if (filter === 'pi_sheet')   list = list.filter(a => getCategory(a) === 'pi_sheet')
+    else if (filter === 'exception_all')  list = list.filter(a => ['otif_exception', 'cancellation'].includes(getCategory(a)))
+    else if (filter === 'exception_date') list = list.filter(a => getCategory(a) === 'otif_exception')
+    else if (filter === 'exception_qty')  list = list.filter(a => getCategory(a) === 'cancellation')
     else if (filter === 'unread')     list = list.filter(a => !a.is_read)
   } else {
     if      (filter === 'unread')       list = list.filter(a => !a.is_read)
@@ -146,6 +160,11 @@ function filterAlerts(alerts, isAdmin, filter, query) {
     else if (filter === 'pi_delay')     list = list.filter(a => getCategory(a) === 'delay')
     else if (filter === 'pi_reminder')  list = list.filter(a => getCategory(a) === 'reminder')
     else if (filter === 'inspection')   list = list.filter(a => getCategory(a) === 'inspection')
+    else if (filter === 'product_sheet') list = list.filter(a => getCategory(a) === 'product_sheet')
+    else if (filter === 'pi_sheet')     list = list.filter(a => getCategory(a) === 'pi_sheet')
+    else if (filter === 'exception_all')  list = list.filter(a => ['otif_exception', 'cancellation'].includes(getCategory(a)))
+    else if (filter === 'exception_date') list = list.filter(a => getCategory(a) === 'otif_exception')
+    else if (filter === 'exception_qty')  list = list.filter(a => getCategory(a) === 'cancellation')
   }
 
   if (query) {
@@ -161,14 +180,19 @@ function filterAlerts(alerts, isAdmin, filter, query) {
 
 function computeCounts(alerts, isAdmin) {
   if (!isAdmin) {
-    const rel = alerts.filter(a => ['reminder', 'overdue', 'delay', 'inspection'].includes(getCategory(a)))
+    const rel = alerts.filter(a => ['reminder', 'overdue', 'delay', 'inspection', 'product_sheet', 'pi_sheet', 'otif_exception', 'cancellation'].includes(getCategory(a)))
     return {
-      all:        rel.length,
-      unread:     rel.filter(a => !a.is_read).length,
-      reminder:   rel.filter(a => getCategory(a) === 'reminder').length,
-      overdue:    rel.filter(a => getCategory(a) === 'overdue').length,
-      delay:      rel.filter(a => getCategory(a) === 'delay').length,
-      inspection: rel.filter(a => getCategory(a) === 'inspection').length,
+      all:           rel.length,
+      unread:        rel.filter(a => !a.is_read).length,
+      reminder:      rel.filter(a => getCategory(a) === 'reminder').length,
+      overdue:       rel.filter(a => getCategory(a) === 'overdue').length,
+      delay:         rel.filter(a => getCategory(a) === 'delay').length,
+      inspection:    rel.filter(a => getCategory(a) === 'inspection').length,
+      product_sheet: rel.filter(a => getCategory(a) === 'product_sheet').length,
+      pi_sheet:      rel.filter(a => getCategory(a) === 'pi_sheet').length,
+      exceptionAll:  rel.filter(a => ['otif_exception', 'cancellation'].includes(getCategory(a))).length,
+      exceptionDate: rel.filter(a => getCategory(a) === 'otif_exception').length,
+      exceptionQty:  rel.filter(a => getCategory(a) === 'cancellation').length,
     }
   }
   const poAll = alerts.filter(a => ['po','confirmed'].includes(getCategory(a)) && resolvePO(a)?.deleted !== true)
@@ -188,6 +212,11 @@ function computeCounts(alerts, isAdmin) {
     piDelay:     piAll.filter(a => getCategory(a) === 'delay').length,
     piReminder:  piAll.filter(a => getCategory(a) === 'reminder').length,
     inspection:  alerts.filter(a => getCategory(a) === 'inspection').length,
+    product_sheet: alerts.filter(a => getCategory(a) === 'product_sheet').length,
+    pi_sheet:    alerts.filter(a => getCategory(a) === 'pi_sheet').length,
+    exceptionAll:  alerts.filter(a => ['otif_exception', 'cancellation'].includes(getCategory(a))).length,
+    exceptionDate: alerts.filter(a => getCategory(a) === 'otif_exception').length,
+    exceptionQty:  alerts.filter(a => getCategory(a) === 'cancellation').length,
   }
 }
 

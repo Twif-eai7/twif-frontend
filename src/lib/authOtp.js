@@ -1,5 +1,9 @@
 import { supabase, supabaseConfigMessage } from './supabase'
 
+export const OTP_LENGTH = 4
+
+const otpTokenKey = (email) => `twif-otp-token:${email}`
+
 /**
  * Send an email OTP via the backend (code only — no confirm/magic link).
  * Falls back to Supabase signInWithOtp if this backend route is not deployed yet.
@@ -17,7 +21,10 @@ export async function sendAuthOtp(email, { shouldCreateUser = false, path = '/au
         body: JSON.stringify({ email: normalised, shouldCreateUser: !!shouldCreateUser }),
       })
       const data = await res.json().catch(() => ({}))
-      if (res.ok) return
+      if (res.ok) {
+        if (data.otpToken) sessionStorage.setItem(otpTokenKey(normalised), data.otpToken)
+        return
+      }
       // 404 with a JSON error is "no account". Plain 404 means the route is not deployed yet.
       if (res.status === 404 && data.error) throw new Error(data.error)
       if (res.status !== 404) {
@@ -53,6 +60,23 @@ export async function sendAuthOtp(email, { shouldCreateUser = false, path = '/au
 
 export async function verifyEmailOtp(email, token) {
   if (!supabase) throw new Error(supabaseConfigMessage)
+  const normalised = String(email || '').trim().toLowerCase()
+  const otpToken = sessionStorage.getItem(otpTokenKey(normalised))
+  const backend = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, '')
+  if (otpToken && backend) {
+    const res = await fetch(`${backend}/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: normalised, code: token, otpToken }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || !body.tokenHash) throw new Error(body.error || 'Verification failed. Please try again.')
+    const { data, error } = await supabase.auth.verifyOtp({ token_hash: body.tokenHash, type: body.type || 'magiclink' })
+    if (error) throw error
+    sessionStorage.removeItem(otpTokenKey(normalised))
+    return data
+  }
+
   const types = ['magiclink', 'email', 'signup']
   let lastError = null
   for (const type of types) {

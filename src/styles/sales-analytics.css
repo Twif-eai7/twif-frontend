@@ -9,40 +9,60 @@
 
 /* Per-row min-heights — cards grow with content above these floors */
 /* ── Edit these to control minimum row sizes ── */
-[data-card-id="fy26_shipped"],
+[data-card-id="current_fy_shipped"],
 [data-card-id="open_po"],
 [data-card-id="volume_shipped"],
-[data-card-id="fy25_shipped"]       { min-height: 220px; }
+[data-card-id="prev_fy_shipped"]    { min-height: 170px; }
 
 [data-card-id="shipped_po_count"],
 [data-card-id="open_pos_count"],
 [data-card-id="growth_rate"],
-[data-card-id="actual_growth"]      { min-height: 160px; }
+[data-card-id="target_achieved"],
+/* Supplier/vendor dashboard only — replace growth_rate/target_achieved/
+   volume_shipped in that view, never rendered alongside them. */
+[data-card-id="quality_claims"],
+[data-card-id="avg_lead_time"],
+[data-card-id="avg_delivery_delay"] { min-height: 130px; }
 
 [data-card-id="sourcing_by_region"],
-[data-card-id="open_po_monthly"]    { min-height: 360px; }
+[data-card-id="open_po_monthly"]    { min-height: 300px; }
 [data-card-id="volume_over_time"],
 [data-card-id="volume_fy26"],
-[data-card-id="volume_fy27"]        { min-height: 400px; }
+[data-card-id="volume_fy27"]        { min-height: 330px; }
 
 @media (min-width: 1024px) {
   .magic-bento-grid {
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: auto auto auto;
   }
-  [data-card-id="fy26_shipped"]       { grid-column: 1; grid-row: 1; }
+  /* These data-card-id values previously read fy26_shipped/fy25_shipped/
+     actual_growth — stale names left over from before those three cards
+     were renamed in AnalyticsV2Section.jsx. Fixed to match; this was
+     invisible until now purely by luck (CSS Grid's row-major auto-
+     placement happened to drop the then-unmatched cards into these exact
+     same cells anyway, and default stretch sizing covered for the missing
+     min-height above) — reordering or adding a card would have broken it. */
+  [data-card-id="current_fy_shipped"] { grid-column: 1; grid-row: 1; }
   [data-card-id="open_po"]            { grid-column: 2; grid-row: 1; }
   [data-card-id="volume_shipped"]     { grid-column: 3; grid-row: 1; }
-  [data-card-id="fy25_shipped"]       { grid-column: 4; grid-row: 1; }
+  [data-card-id="prev_fy_shipped"]    { grid-column: 4; grid-row: 1; }
   [data-card-id="shipped_po_count"]   { grid-column: 1; grid-row: 2; }
   [data-card-id="open_pos_count"]     { grid-column: 2; grid-row: 2; }
   [data-card-id="growth_rate"]        { grid-column: 3; grid-row: 2; }
-  [data-card-id="actual_growth"]      { grid-column: 4; grid-row: 2; }
+  [data-card-id="target_achieved"]    { grid-column: 4; grid-row: 2; }
   [data-card-id="sourcing_by_region"] { grid-column: 1 / span 2; grid-row: 3; }
   [data-card-id="open_po_monthly"]    { grid-column: 3 / span 2; grid-row: 3; }
   [data-card-id="volume_over_time"]   { grid-column: 1 / span 4; grid-row: 4; }
   [data-card-id="volume_fy26"]        { grid-column: 1 / span 2; grid-row: 4; }
   [data-card-id="volume_fy27"]        { grid-column: 3 / span 2; grid-row: 4; }
+
+  /* Supplier/vendor dashboard only — these fill volume_shipped/growth_rate/
+     target_achieved's exact old cells; the two variants never render at the
+     same time (showTargetStats in AnalyticsV2Section.jsx), so there's no
+     clash reusing the same 3 cells. */
+  [data-card-id="quality_claims"]      { grid-column: 3; grid-row: 1; }
+  [data-card-id="avg_lead_time"]       { grid-column: 3; grid-row: 2; }
+  [data-card-id="avg_delivery_delay"]  { grid-column: 4; grid-row: 2; }
 }
 
 @media (min-width: 600px) and (max-width: 1023px) {
@@ -51,9 +71,188 @@
 }
 
 @media (max-width: 599px) {
-  .magic-bento-grid { grid-template-columns: 1fr; }
+  /* 2 columns, not 1 — simple number-tile cards (a title + one number) pair
+     up 2-per-row via the default column span below; chart/table cards get
+     an explicit full-width span since they need real width to stay
+     legible. No duplicated markup for either kind — same single DOM
+     instance as desktop, just reflowed and reordered here. */
+  .magic-bento-grid { grid-template-columns: repeat(2, 1fr); }
+
+  [data-card-id="volume_shipped"],
+  [data-card-id="shipped_po_count"],
+  [data-card-id="open_po_monthly"],
+  [data-card-id="sourcing_by_region"],
+  [data-card-id="volume_over_time"],
+  [data-card-id="volume_fy26"],
+  [data-card-id="volume_fy27"] {
+    grid-column: 1 / -1;
+  }
+
+  /* Visual order only (DOM/desktop placement untouched) — shipped
+     performance first (this FY vs previous FY paired, then its own
+     progress-to-target gauge, then the fully-shipped/on-time/late/partial
+     breakdown), then open-PO pipeline (value + count paired, then the
+     month-by-month table), then the remaining secondary cards in their
+     previous relative order. */
+  [data-card-id="current_fy_shipped"]  { order: 1; }
+  [data-card-id="prev_fy_shipped"]     { order: 2; }
+  [data-card-id="volume_shipped"]      { order: 3; }
+  [data-card-id="shipped_po_count"]    { order: 4; }
+  [data-card-id="open_po"]             { order: 5; }
+  [data-card-id="open_pos_count"]      { order: 6; }
+  [data-card-id="open_po_monthly"]     { order: 7; }
+  [data-card-id="growth_rate"]         { order: 8; }
+  [data-card-id="target_achieved"]     { order: 9; }
+  /* Supplier/vendor dashboard only — same slot growth_rate/target_achieved/
+     volume_shipped occupy above, never rendered alongside them. */
+  [data-card-id="quality_claims"]      { order: 10; }
+  [data-card-id="avg_lead_time"]       { order: 11; }
+  [data-card-id="avg_delivery_delay"]  { order: 12; }
+  [data-card-id="sourcing_by_region"]  { order: 13; }
+  [data-card-id="volume_over_time"]    { order: 14; }
+  [data-card-id="volume_fy26"]         { order: 14; }
+  [data-card-id="volume_fy27"]         { order: 15; }
 }
 
 .grid-template-ftpr {
   grid-template-columns: 2.5fr 1fr 1fr 1.5fr;
+}
+
+/* AnalyticsV2Section's pill-stats row (TYTD Open Pos/Target/Achieved/YOY
+   Growth), sitting directly above magic-bento-grid's KPI cards — mirrors
+   that grid's own column breakpoints exactly so pill 1 lands in the same
+   column as KPI card 1, pill 2 above card 2, etc., rather than just
+   flex-wrapping independently of the grid below it. Desktop/tablet only
+   (600px and up) — see .analytics-pill-grid-mobile below for why. */
+.analytics-pill-grid {
+  display: none;
+  gap: 1em;
+}
+@media (min-width: 1024px) {
+  .analytics-pill-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+}
+@media (min-width: 600px) and (max-width: 1023px) {
+  .analytics-pill-grid { display: grid; grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Mobile-only counterpart, below 600px — a genuinely separate layout rather
+   than squeezing .analytics-pill-grid's bento-mirroring column count down
+   to 1 (which is what used to render here and looked sparse/oversized: a
+   full-width label-then-box row per stat). This one owns its own clean
+   2-column grid with the label stacked above the value, matching the
+   header stats bar's own mobile treatment, rather than trying to make one
+   markup structure serve both a bento-aligned desktop grid and a compact
+   mobile grid at once. */
+.analytics-pill-grid-mobile {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+@media (min-width: 600px) {
+  .analytics-pill-grid-mobile { display: none; }
+}
+
+/* Scale the filter bar + header stats bar up on genuinely spacious screens
+   (not Tailwind's xl: 1280px — a 1366x768 laptop already hits that and has
+   no real spare width, which is exactly what broke last time) so they don't
+   look sparse with a huge gap between the left-aligned filters/stats and the
+   right-aligned Export/FY-Year block. 1700px clears 1366/1440/1536-wide
+   laptops entirely; only real desktop monitors (1920px+) cross it. */
+@media (min-width: 1700px) {
+  .analytics-filter-row .analytics-status-pill {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+    font-size: 0.8125rem;
+  }
+  .analytics-mis-select {
+    height: 2.25rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    font-size: 0.8125rem;
+    max-width: 260px;
+  }
+  .analytics-export-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+  }
+  .analytics-date-row {
+    column-gap: 2.5rem;
+  }
+  .analytics-date-label {
+    font-size: 0.75rem;
+  }
+  .analytics-date-input {
+    width: 11rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    font-size: 0.8125rem;
+  }
+  .analytics-year-pill {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    font-size: 0.75rem;
+  }
+
+  .analytics-stats-bar {
+    column-gap: 3rem;
+  }
+  .analytics-stat-item {
+    padding-right: 2.5rem;
+  }
+  .analytics-stats-bar .stat-value {
+    font-size: 1.5rem;
+  }
+  .analytics-fy-refresh {
+    gap: 1.5rem;
+  }
+  .analytics-fy-refresh select {
+    height: 2.5rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* AnalyticsV2Section's header stats bar (Buyer/Total PO Value/etc.) — shrink
+   its vertical footprint on short viewports (e.g. a 1366x768/800-tall
+   laptop screen) so more of the page is visible without scrolling. Height,
+   not width, is the constraint here, so this is a max-height query rather
+   than Tailwind's (width-only) responsive prefixes. */
+@media (max-height: 800px) {
+  .analytics-stats-bar {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
+    /* Narrower gaps so the FY Year/Refresh block at the end has a better
+       chance of staying on the same line as the stat items instead of
+       wrapping to its own row, which was adding height back even after the
+       stat text itself shrank. */
+    column-gap: 1rem;
+  }
+  .analytics-stats-bar .stat-value {
+    font-size: 1rem;
+    line-height: 1.25rem;
+  }
+  .analytics-fy-refresh {
+    gap: 0.5rem !important;
+  }
+  .analytics-fy-refresh select {
+    height: 1.75rem;
+    font-size: 0.7rem;
+  }
+
+  /* Pill stats (TYTD Open Pos / Target / Achieved / YOY Growth) — h-11
+     (44px) boxes are generous for a short viewport; shrink the box height
+     and value text, and tighten the row's own vertical margin. */
+  .analytics-pill-grid {
+    margin-bottom: 0.5rem;
+  }
+  .analytics-pill-grid .pill-box {
+    height: 1.75rem;
+  }
+  .analytics-pill-grid .pill-value {
+    font-size: 0.8125rem;
+  }
 }

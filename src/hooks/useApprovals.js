@@ -120,6 +120,26 @@ export function useApprovals() {
     }
   }, [session])
 
+  // Add an internal admin note to a pending org (appends to the row, no removal)
+  const addOrgNote = useCallback(async (id, note) => {
+    setActing({ id, action: 'comment' })
+    try {
+      const res = await fetch(`${BASE}/org-customers/orgs/${id}/notes`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ note }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to save note')
+      setPendingOrgs(prev => prev.map(o =>
+        o.id === id ? { ...o, admin_notes: [...(o.admin_notes || []), data.data] } : o))
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    } finally {
+      setActing(null)
+    }
+  }, [session])
+
   // Fetch the dry-run NDA preview PDF for a pending org — returns a blob URL
   const previewOrgPdf = useCallback(async (id) => {
     try {
@@ -181,6 +201,7 @@ export function useApprovals() {
     rejectRequest,
     approveOrg,
     rejectOrg,
+    addOrgNote,
     previewOrgPdf,
     verifyOrg,
     signOrg,

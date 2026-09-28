@@ -5,6 +5,10 @@ import { useProfileStore } from './profileStore'
 import { supabase } from '../lib/supabase'
 import { playIncomingCallSound } from '../utils/callSound'
 import { pickJoinUrl, toEmbedJoinUrl } from '../lib/videoCall'
+import { isPlmMasterKeyEligible } from '../utils/plmMasterKey'
+import { usePlmMasterKeyStore } from './plmMasterKeyStore'
+import { resolveBuyerOrgsForMember } from '../lib/poQueries'
+import { getAttachmentUrl, isAttachmentRemoved, normalizeAttachment } from '../utils/plmAttachments'
 
 
 function parseCommentMeta(metadata) {
@@ -24,6 +28,12 @@ function callJoinUrl(data, userName) {
 const API_BASE = import.meta.env.VITE_BACKEND_URL
 
 const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size))
+
+// Tech-dept members with the PLM Master Key toggled on get full (non-read-only) access
+// to the cross-org admin catalog view instead of the normal read-only overlay.
+function isPlmMasterKeyActiveFor(membership) {
+  return isPlmMasterKeyEligible(membership) && usePlmMasterKeyStore.getState().active
+}
 
 async function fetchAllRows(buildQuery) {
   const PAGE = 1000
@@ -47,7 +57,8 @@ const attachApprovedPrices = async (workspacesById) => {
   if (!wsIds.length) return
   const { data: soRows } = await supabase
     .from('npd2_sample_orders')
-    .select('workspace_id, confirmed_price, currency, created_at')
+    .select(`workspace_id, confirmed_price, confirmed_qty, currency, created_at, sample_status,
+      findings, ship_mode, courier_company, tracking_ref, container_no, vessel_no, etd, eta, sample_delivered_date`)
     .in('workspace_id', wsIds)
     .order('created_at', { ascending: false })
   const soByWs = {}
@@ -56,6 +67,10 @@ const attachApprovedPrices = async (workspacesById) => {
     const so = soByWs[w.id]
     w.approved_price    = so?.confirmed_price ?? null
     w.approved_currency = so?.currency        ?? null
+    // Kept as the raw row (rather than flattening) so Summary Mode's gap-detection logic
+    // (src/utils/plmSummary.js) can read the exact same shape WorkspaceModal reads from
+    // activeWorkspace.sampleOrder, without this helper having to know its field list.
+    w.sample_order = so || null
   }
 }
 
@@ -81,6 +96,10 @@ const api = async (method, path, body, formData, signal) => {
   const headers = formData
     ? { Authorization: `Bearer ${session?.access_token}` }
     : { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` }
+  // Activation half of the Master Key override — the backend treats a tech-dept member as
+  // a normal participant unless this header is present (see helpers/plmMasterKey.js). Only
+  // sent while the session-scoped "Super Admin Mode" toggle is on.
+  if (usePlmMasterKeyStore.getState().active) headers['X-PLM-Master-Key'] = '1'
   const res = await fetch(`${API_BASE}/plm${path}`, {
     method,
     headers,
@@ -99,6 +118,7 @@ const apiUpload = (path, formData, onProgress) => new Promise((resolve, reject) 
   const xhr = new XMLHttpRequest()
   xhr.open('POST', `${API_BASE}/plm${path}`)
   xhr.setRequestHeader('Authorization', `Bearer ${session?.access_token}`)
+  if (usePlmMasterKeyStore.getState().active) xhr.setRequestHeader('X-PLM-Master-Key', '1')
   xhr.upload.onprogress = (e) => {
     if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total)
   }
@@ -116,27 +136,37 @@ const FIELD_LABELS = {
   l: 'length', w: 'width', h: 'height',
   weight: 'weight', material: 'material', finish: 'finish',
   description: 'description', unit_price: 'target price',
-  unit_qty: 'unit qty', quality_notes: 'quality notes',
+  unit_qty: 'unit qty', notes: 'notes', quality_notes: 'notes',
   buyer_ref: 'buyer reference', color: 'color',
-  target_ready_date: 'target ready date',
+  vendor_sku_ref: 'vendor SKU ref',
+  target_ready_date: 'sample ready date',
   actual_ready_date: 'actual ready date',
   additional_notes:  'additional notes',
-  dispatch_date:     'dispatch date',
+  qa_comments:       'QA comments',
+  sample_delivered_date: 'sample delivered date',
   ship_mode:         'ship mode',
   tracking_ref:      'tracking reference',
   etd:               'ETD',
   eta:               'ETA',
-  actual_weight:         'actual weight',
-  actual_dims:           'Actual L×W×H',
-  inner_qty:             'inner qty',
-  inner_dims:            'Inner L×W×H',
+  container_no:      'container number',
+  vessel_no:         'vessel number',
+  courier_company:   'courier company',
+  actual_weight:         'Actual Sample Weight (Net)',
+  actual_dims:           'Actual Dimension',
+  inner_qty:             'Inner Quantity',
+  inner_dims:            'Inner Dimension',
+  inner_weight:          'Inner Pack Weight',
+  // master_qty/master_dims/master_pack_weight_kg are the pre-multi-carton flat fields — kept
+  // for backward compatibility with any field_change comment logged before that feature
+  // existed. Live saves now go through master_cartons below instead.
   master_qty:            'master qty',
   master_dims:           'Master L×W×H',
   master_pack_weight_kg: 'master weight',
-  cbm:                   'CBM (m³)',
+  master_cartons:        'Master Carton details',
+  cbm:                   'Total CBM (m³)',
 }
 
-const MILESTONE_LABELS = {
+export const MILESTONE_LABELS = {
   approved_to_sample: 'Proceeded to Sample',
   sample_in_process:  'Sample In Process',
   sample_ready:       'Sample Ready',
@@ -146,6 +176,12 @@ const MILESTONE_LABELS = {
   sample_images_updated:   'Sample Images Updated',
   production_image_set:    'Production Image Set',
   production_image_unset:  'Production Image Unset',
+  buyer_brief_image_set:   'Buyer Brief Image Set',
+  buyer_brief_image_unset: 'Buyer Brief Image Removed',
+  note_images_added:       'Images Added from Notes',
+  product_image_set:       'Product Image Updated',
+  reference_media_edited:   'Reference Media Edited',
+  reference_media_replaced: 'Reference Media Replaced',
   revision_requested: 'Revision Requested',
   sample_accepted:    'Sample Accepted',
   sample_rejected:    'Sample Rejected',
@@ -155,13 +191,14 @@ const MILESTONE_LABELS = {
   video_call_declined:  'Video call declined',
   video_call_cancelled: 'Video call cancelled',
   video_call_ended:     'Video call ended',
+  shipping_details_complete: 'Shipping Details Filled',
   status_changed_to_on_hold:  'Workspace On Hold',
-  status_changed_to_rejected: 'Workspace Rejected',
+  status_changed_to_rejected: 'SKU Dropped',
   status_changed_to_active:   'Workspace Resumed',
   status_changed_to_approved: 'Workspace Approved',
 }
 
-function mapComment(row) {
+export function mapComment(row) {
   let body = row.body
   if (row.type === 'field_change') {
     try {
@@ -184,7 +221,7 @@ function mapComment(row) {
     } catch { /* ignored */ }
   }
 
-  let quoted = null, quoted_author = null, quoted_id = null, quoted_thumb = null
+  let quoted = null, quoted_author = null, quoted_id = null, quoted_thumb = null, quoted_thumbs = []
   if (row.reply_to) {
     try {
       const rt = typeof row.reply_to === 'string' ? JSON.parse(row.reply_to) : row.reply_to
@@ -192,10 +229,11 @@ function mapComment(row) {
       quoted_author = rt?.author_name || rt?.role || null
       quoted_id     = rt?.id          || null
       quoted_thumb  = rt?.quoted_thumb || null
+      quoted_thumbs = rt?.quoted_thumbs || []
     } catch { /* ignored */ }
   }
 
-  return { ...row, body, quoted, quoted_author, quoted_id, quoted_thumb }
+  return { ...row, body, quoted, quoted_author, quoted_id, quoted_thumb, quoted_thumbs }
 }
 
 // Fetch comments of `type` for a workspace, returning only ones not already in
@@ -246,6 +284,10 @@ function mapSkuRows(data) {
     temp_sku_ref:          row.temp_sku_ref   || null,
     buyer_ref_status:      (!row.production_sku_id && row.temp_sku_ref) ? 'pending_buyer_ref' : null,
     sort_position:         row.sort_position ?? null,
+    original_price:        row.original_price ?? null,
+    original_currency:     row.original_currency || null,
+    notes:                 row.notes       || null,   // { html, images } — rich SKU note
+    spec_images:           row.spec_images || [],       // [{ url, remark, origin:'kaptr', ... }]
   }))
 }
 
@@ -357,9 +399,10 @@ export const STATUS_LABELS = {
   reviewing:         'Reviewing',
   approved:          'Approved',
   sample:            'Sample Stage',
+  sample_shipped:    'Sample Shipped',
   production:        'Approved to PO',
   on_hold:           'On Hold',
-  rejected:          'Rejected',
+  rejected:          'Dropped',
   to_do:             'To Do',
   in_progress:       'In Progress',
   complete:          'Complete',
@@ -376,6 +419,7 @@ export const STATUS_COLORS = {
   reviewing:   'bg-[#EDE9FF] text-[#4A1FA8]',    // purple  — under review
   approved:    'bg-[#E6F2DC] text-[#2D6A1F]',    // green   — approved
   sample:      'bg-[#D0E8FF] text-[#0B4F8A]',    // blue    — sample stage
+  sample_shipped: 'bg-[#CFFAFE] text-[#0E7490]', // cyan — sample shipped
   production:  'bg-[#2D6A1F] text-white',        // solid dark green — approved to PO
   on_hold:     'bg-[#FFE8D0] text-[#8C3A00]',    // orange  — paused
   rejected:    'bg-[#FCEAEA] text-[#7A1A1A]',    // red     — rejected
@@ -421,6 +465,7 @@ export const usePlmStore = create(
       _realtimeChannel:  null,
       _catalogChannel:   null,
       _fetchCallId:      0,
+      _catalogInsertRefreshTimer: null,
       _memberNameMap:    {},   // memberId → display name
       incomingVideoCall: null, // { workspaceId, inviteId, startedBy, startedByName, isInvite, calleeUserId }
       activeVideoCall:   null, // { workspaceId, joinUrl, inviteId, roomId, role, status }
@@ -437,24 +482,35 @@ export const usePlmStore = create(
 
           if (role === 'merchant') {
             // Layer 1: own uploads + supplier public catalogs + peer access lookups
+            // Own uploads / supplier-public-catalog queries below now use fetchAllRows —
+            // previously plain (unpaginated) queries, capped by PostgREST's implicit 1000-row
+            // limit. Any merchant/supplier exceeding 1000 SKUs in one of these buckets would
+            // have silently had the rest truncated, with no error and no indication to the user.
             const SKU_SELECT = '*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )'
             const [
-              { data: ownData,      error: dbErr },
-              { data: supplierData },
-              { data: pairRows },
+              ownData,
+              supplierData,
+              { data: pairRows, error: dbErr },
               { data: explicitRows },
+              buyerScopedOrgs,
             ] = await Promise.all([
-              supabase.from('npd2_catalog_skus')
-                .select(SKU_SELECT)
-                .eq('npd2_catalog_uploads.created_by_member_id', memberId)
-                .eq('is_archived', false).is('delete_meta', null)
-                .order('created_at', { ascending: false }),
-              supabase.from('npd2_catalog_skus')
-                .select(SKU_SELECT)
-                .is('npd2_catalog_uploads.created_by_member_id', null)
-                .not('npd2_catalog_uploads.supplier_org_id', 'is', null)
-                .eq('is_archived', false).is('delete_meta', null)
-                .order('created_at', { ascending: false }),
+              fetchAllRows((from, to) =>
+                supabase.from('npd2_catalog_skus')
+                  .select(SKU_SELECT)
+                  .eq('npd2_catalog_uploads.created_by_member_id', memberId)
+                  .eq('is_archived', false).is('delete_meta', null)
+                  .order('created_at', { ascending: false })
+                  .range(from, to)
+              ),
+              fetchAllRows((from, to) =>
+                supabase.from('npd2_catalog_skus')
+                  .select(SKU_SELECT)
+                  .is('npd2_catalog_uploads.created_by_member_id', null)
+                  .not('npd2_catalog_uploads.supplier_org_id', 'is', null)
+                  .eq('is_archived', false).is('delete_meta', null)
+                  .order('created_at', { ascending: false })
+                  .range(from, to)
+              ),
               // Standing peer pairs where this member is the grantee
               supabase.from('merchant_access_pairs')
                 .select('grantor_member_id')
@@ -463,69 +519,110 @@ export const usePlmStore = create(
               supabase.from('npd2_catalog_access')
                 .select('catalog_upload_id')
                 .eq('member_id', memberId),
+              // Buyer orgs this merchant is scoped to handle (member_organization_access) —
+              // needed below to also surface uploads TAGGED to one of those buyers even when
+              // someone else (another merchant, or a vendor uploading their own catalog)
+              // created the upload. Vendor self-uploads in particular were previously
+              // invisible to every merchant, since they match none of the other buckets here.
+              resolveBuyerOrgsForMember(memberId),
             ])
 
             if (dbErr) throw dbErr
 
-            // Layer 2: fetch SKUs for peer pairs and explicit shares (if any)
-            const grantorIds    = (pairRows    || []).map(r => r.grantor_member_id).filter(Boolean)
+            // Layer 2: fetch SKUs for peer pairs, explicit shares, and buyer-scoped uploads
+            const grantorIds      = (pairRows    || []).map(r => r.grantor_member_id).filter(Boolean)
             const sharedUploadIds = (explicitRows || []).map(r => r.catalog_upload_id).filter(Boolean)
+            const buyerOrgIds     = (buyerScopedOrgs || []).map(o => o.id).filter(Boolean)
 
-            const [{ data: pairSkuData }, { data: explicitSkuData }] = await Promise.all([
+            const [pairSkuData, explicitSkuData, buyerScopedSkuData] = await Promise.all([
               grantorIds.length
-                ? supabase.from('npd2_catalog_skus')
-                    .select(SKU_SELECT)
-                    .in('npd2_catalog_uploads.created_by_member_id', grantorIds)
-                    .eq('is_archived', false).is('delete_meta', null)
-                    .order('created_at', { ascending: false })
-                : Promise.resolve({ data: [] }),
+                ? fetchAllRows((from, to) =>
+                    supabase.from('npd2_catalog_skus')
+                      .select(SKU_SELECT)
+                      .in('npd2_catalog_uploads.created_by_member_id', grantorIds)
+                      .eq('is_archived', false).is('delete_meta', null)
+                      .order('created_at', { ascending: false })
+                      .range(from, to)
+                  )
+                : Promise.resolve([]),
               sharedUploadIds.length
-                ? supabase.from('npd2_catalog_skus')
-                    .select(SKU_SELECT)
-                    .in('npd2_catalog_uploads.id', sharedUploadIds)
-                    .eq('is_archived', false).is('delete_meta', null)
-                    .order('created_at', { ascending: false })
-                : Promise.resolve({ data: [] }),
+                ? fetchAllRows((from, to) =>
+                    supabase.from('npd2_catalog_skus')
+                      .select(SKU_SELECT)
+                      .in('npd2_catalog_uploads.id', sharedUploadIds)
+                      .eq('is_archived', false).is('delete_meta', null)
+                      .order('created_at', { ascending: false })
+                      .range(from, to)
+                  )
+                : Promise.resolve([]),
+              buyerOrgIds.length
+                ? fetchAllRows((from, to) =>
+                    supabase.from('npd2_catalog_skus')
+                      .select(SKU_SELECT)
+                      .in('npd2_catalog_uploads.for_buyer_org_id', buyerOrgIds)
+                      .eq('is_archived', false).is('delete_meta', null)
+                      .order('created_at', { ascending: false })
+                      .range(from, to)
+                  )
+                : Promise.resolve([]),
             ])
 
-            // Merge all sources, deduplicate by SKU id; peer/explicit = full access (no is_read_only)
+            // Merge all sources, deduplicate by SKU id; peer/explicit/buyer-scoped = full access (no is_read_only)
             const seenIds = new Set()
             const merged = []
             for (const row of [
-              ...(ownData         || []),
-              ...(supplierData    || []),
-              ...(pairSkuData     || []),
-              ...(explicitSkuData || []),
+              ...(ownData           || []),
+              ...(supplierData      || []),
+              ...(pairSkuData       || []),
+              ...(explicitSkuData   || []),
+              ...(buyerScopedSkuData || []),
             ]) {
               if (!seenIds.has(row.id)) { seenIds.add(row.id); merged.push(row) }
             }
             const rawSkus = mapSkuRows(merged)
 
-            // Admin/owner: read-only view of all merchandising members' SKUs
+            // Admin/owner: read-only view of all merchandising + tech members' SKUs
             const membership = useProfileStore.getState().orgMembership
             const isAdmin = membership?.role === 'admin' || membership?.role === 'owner'
+            const masterKeyActive = isPlmMasterKeyActiveFor(membership)
             let adminViewSkus = []
-            if (isAdmin && membership?.orgId) {
+            if ((isAdmin || isPlmMasterKeyEligible(membership)) && membership?.orgId) {
               const { data: merchMembers } = await supabase
                 .from('organization_members')
                 .select('id')
                 .eq('organization_id', membership.orgId)
-                .eq('department', 'merchandising')
+                .in('department', ['merchandising', 'tech'])
                 .neq('id', memberId)
               const merchIds = (merchMembers || []).map(m => m.id).filter(Boolean)
               if (merchIds.length) {
-                const adminSkuData = await fetchAllRows((from, to) =>
-                  supabase.from('npd2_catalog_skus')
-                    .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
-                    .filter('npd2_catalog_uploads.created_by_member_id', 'in', `(${merchIds.join(',')})`)
-                    .eq('is_archived', false)
-                    .is('delete_meta', null)
-                    .order('created_at', { ascending: false })
-                    .range(from, to)
+                // Previously one query with the ENTIRE merchIds list embedded as a raw
+                // filter string (`.filter(..., 'in', '(id1,id2,...)')`) on the joined
+                // table, paginated sequentially — the exact unchunked-large-IN-list
+                // pattern that already caused a silent-400 outage elsewhere in this app
+                // (see plm_master_key_and_activity_log memory) and, being sequential, was
+                // the single biggest contributor to a 17s+ LCP for admin/tech-dept users.
+                // Chunked + parallel instead, same pattern as fetchInChunks() elsewhere —
+                // and using a proper `.in()` per chunk (already proven to work on this
+                // joined column two queries above, for the peer-pairs fetch) instead of
+                // the raw filter-string form.
+                const merchIdChunks = chunkArray(merchIds, 100)
+                const chunkResults = await Promise.all(
+                  merchIdChunks.map(chunk =>
+                    fetchAllRows((from, to) =>
+                      supabase.from('npd2_catalog_skus')
+                        .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
+                        .in('npd2_catalog_uploads.created_by_member_id', chunk)
+                        .eq('is_archived', false)
+                        .is('delete_meta', null)
+                        .order('created_at', { ascending: false })
+                        .range(from, to)
+                    )
+                  )
                 )
+                const adminSkuData = chunkResults.flat()
                 adminViewSkus = mapSkuRows(adminSkuData)
                   .filter(s => !seenIds.has(s.id))
-                  .map(s => ({ ...s, is_read_only: true }))
+                  .map(s => ({ ...s, is_read_only: !masterKeyActive }))
               }
             }
 
@@ -559,36 +656,37 @@ export const usePlmStore = create(
               wsList.filter(w => w.buyer_org_id && !w.buyer_member_id && w.buyer_email).map(w => w.buyer_email)
             )]
 
-            // Fetch org names
-            let buyerOrgNameMap = {}
-            if (allBuyerOrgIds.length) {
-              const { data: orgRows } = await supabase
-                .from('organizations')
-                .select('id, display_name, name')
-                .in('id', allBuyerOrgIds)
-              buyerOrgNameMap = Object.fromEntries((orgRows || []).map(o => [o.id, o.display_name || o.name]))
-            }
-
-            // Fetch all accepted invites per workspace (captures secondary buyers + vendors)
+            // Org names and accepted invites are independent of each other (org names come
+            // from allBuyerOrgIds, invites from allWsIds — neither depends on the other's
+            // result), but were previously awaited one after another. Run concurrently.
             const allWsIds = [...new Set(wsList.map(w => w.id).filter(Boolean))]
+            const [orgNamesResult, invResults] = await Promise.all([
+              allBuyerOrgIds.length
+                ? supabase.from('organizations').select('id, display_name, name').in('id', allBuyerOrgIds)
+                : Promise.resolve({ data: [] }),
+              allWsIds.length
+                ? Promise.all(
+                    chunkArray(allWsIds, 100).map(chunk =>
+                      supabase.from('npd2_invites').select('workspace_id, member_id, role, email')
+                        .in('workspace_id', chunk).eq('status', 'accepted').not('member_id', 'is', null)
+                    )
+                  )
+                : Promise.resolve([]),
+            ])
+
+            const buyerOrgNameMap = Object.fromEntries(
+              (orgNamesResult.data || []).map(o => [o.id, o.display_name || o.name])
+            )
+
             let wsAcceptedBuyerIds = {}, wsAcceptedSupplierIds = {}, inviteEmailById = {}
-            if (allWsIds.length) {
-              const invChunks = chunkArray(allWsIds, 100)
-              const invResults = await Promise.all(
-                invChunks.map(chunk =>
-                  supabase.from('npd2_invites').select('workspace_id, member_id, role, email')
-                    .in('workspace_id', chunk).eq('status', 'accepted').not('member_id', 'is', null)
-                )
-              )
-              for (const { data } of invResults)
-                for (const row of (data || [])) {
-                  inviteEmailById[row.member_id] = inviteEmailById[row.member_id] || row.email
-                  const isBuyer = row.role === 'buyer'
-                  const map = isBuyer ? wsAcceptedBuyerIds : wsAcceptedSupplierIds
-                  if (!map[row.workspace_id]) map[row.workspace_id] = []
-                  if (!map[row.workspace_id].includes(row.member_id)) map[row.workspace_id].push(row.member_id)
-                }
-            }
+            for (const { data } of invResults)
+              for (const row of (data || [])) {
+                inviteEmailById[row.member_id] = inviteEmailById[row.member_id] || row.email
+                const isBuyer = row.role === 'buyer'
+                const map = isBuyer ? wsAcceptedBuyerIds : wsAcceptedSupplierIds
+                if (!map[row.workspace_id]) map[row.workspace_id] = []
+                if (!map[row.workspace_id].includes(row.member_id)) map[row.workspace_id].push(row.member_id)
+              }
 
             const allBuyerMemberIds = [...new Set([
               ...wsList.map(w => w.buyer_member_id).filter(Boolean),
@@ -661,6 +759,7 @@ export const usePlmStore = create(
                 supplier_email:        ws?.supplier_email || null,
                 approved_price:        ws?.approved_price    ?? null,
                 approved_currency:     ws?.approved_currency ?? null,
+                sample_order:          ws?.sample_order      || null,
               }
             })
           } else if (role === 'buyer') {
@@ -694,15 +793,18 @@ export const usePlmStore = create(
 
             const ids = Object.keys(workspaceMap).filter(Boolean)
             if (ids.length) {
-              const { data, error: dbErr } = await supabase
-                .from('npd2_catalog_skus')
-                .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
-                .in('id', ids)
-                .is('delete_meta', null)
-                .order('created_at', { ascending: false })
-
-              if (dbErr) throw dbErr
-              const mappedBuyerSkus = mapSkuRows(data || [])
+              // fetchAllRows — a buyer with more than 1000 workspace-linked SKUs would
+              // otherwise silently lose rows past PostgREST's implicit 1000-row cap.
+              const data = await fetchAllRows((from, to) =>
+                supabase
+                  .from('npd2_catalog_skus')
+                  .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
+                  .in('id', ids)
+                  .is('delete_meta', null)
+                  .order('created_at', { ascending: false })
+                  .range(from, to)
+              )
+              const mappedBuyerSkus = mapSkuRows(data)
               const buyerMerchNameMap = await fetchMemberNameMap(mappedBuyerSkus.map(s => s.created_by_member_id))
               skus = mappedBuyerSkus.map(s => ({
                 ...s,
@@ -715,12 +817,67 @@ export const usePlmStore = create(
                 created_by_member_name: buyerMerchNameMap[s.created_by_member_id] || null,
                 approved_price:     workspaceMap[s.id]?.approved_price    ?? null,
                 approved_currency:  workspaceMap[s.id]?.approved_currency ?? null,
+                sample_order:       workspaceMap[s.id]?.sample_order      || null,
               }))
+            }
+          } else if (role === 'qa') {
+            // QA has no org-wide scope at all (unlike supplier below) — they only ever reach
+            // exactly the SKUs they've been individually invited to, via an accepted
+            // npd2_invites row with role='qa'. Mirrors the buyer branch's secondary-invite
+            // lookup above, just without a primary buyer_member_id workspace query first.
+            const { data: qaInvites } = await supabase
+              .from('npd2_invites')
+              .select('workspace_id')
+              .eq('member_id', memberId)
+              .eq('role', 'qa')
+              .eq('status', 'accepted')
+
+            const qaWsIds = (qaInvites || []).map(i => i.workspace_id).filter(Boolean)
+            if (qaWsIds.length) {
+              const { data: qaWs } = await supabase.from('npd2_workspaces')
+                .select('catalog_sku_id, id, status, buyer_ref, buyer_brief, created_at, origin, reference_media')
+                .in('id', qaWsIds)
+
+              const workspaceMap = {}
+              for (const w of (qaWs || []))
+                if (!workspaceMap[w.catalog_sku_id]) workspaceMap[w.catalog_sku_id] = { id: w.id, status: w.status, buyer_ref: w.buyer_ref, buyer_brief: w.buyer_brief, created_at: w.created_at }
+
+              const ids = Object.keys(workspaceMap).filter(Boolean)
+              if (ids.length) {
+                const data = await fetchAllRows((from, to) =>
+                  supabase
+                    .from('npd2_catalog_skus')
+                    .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
+                    .in('id', ids)
+                    .is('delete_meta', null)
+                    .order('created_at', { ascending: false })
+                    .range(from, to)
+                )
+                const mappedQaSkus = mapSkuRows(data)
+                const qaMerchNameMap = await fetchMemberNameMap(mappedQaSkus.map(s => s.created_by_member_id))
+                skus = mappedQaSkus.map(s => ({
+                  ...s,
+                  workspace_id:       workspaceMap[s.id]?.id,
+                  workspace_status:   workspaceMap[s.id]?.status,
+                  buyer_ref:          workspaceMap[s.id]?.buyer_ref   || null,
+                  buyer_brief:        workspaceMap[s.id]?.buyer_brief || null,
+                  workspace_created_at: workspaceMap[s.id]?.created_at || null,
+                  created_by_member_name: qaMerchNameMap[s.created_by_member_id] || null,
+                }))
+              }
             }
           } else {
             // supplier: org catalog + workspaces they are assigned to or invited on
             skus = await fetchSupplierCatalogSkus(memberId)
           }
+
+          // A newer fetchCatalog call (e.g. role flipping from an initial 'merchant' default to
+          // 'qa' once department finishes loading — see usePLMCatalog.js) may have already
+          // started and could resolve before or after this one. Without this check, whichever
+          // call happens to resolve LAST wins regardless of which is actually current — a stale
+          // empty result from an early, wrongly-scoped fetch could silently overwrite correct,
+          // freshly-loaded data.
+          if (get()._fetchCallId !== callId) return
 
           set({ skus, loading: false }, false, 'plm/fetchDone')
 
@@ -752,37 +909,76 @@ export const usePlmStore = create(
           // Skip channel setup if a newer fetchCatalog call has started
           if (get()._fetchCallId !== callId) return
 
+          // Date.now() suffix (not just callId) so the topic can never collide with a still-live
+          // channel from before a dev-time hot reload of this file — HMR resets _fetchCallId back
+          // to 0/1 while the Supabase client singleton (a separate, non-reloaded module) keeps its
+          // old subscribed channel of the same name alive, and re-adding .on() listeners to an
+          // already-`.subscribe()`d channel throws "cannot add postgres_changes callbacks after
+          // subscribe()".
           const catalogChannel = supabase
-            .channel(`catalog-sku-updates-${memberId}-${callId}`)
+            .channel(`catalog-sku-updates-${memberId}-${callId}-${Date.now()}`)
+            // Both handlers below bail out (no `set()` call at all) when the changed row isn't
+            // relevant to this user's currently-loaded SKUs. This subscription has no
+            // server-side row filter (fires for every UPDATE on these tables org-wide), so
+            // without an early check, any other user's unrelated edit anywhere in the table
+            // was rebuilding this user's entire local `skus` array (new reference -> full
+            // recompute of usePLMFiltered's memos + re-render of every mounted component) even
+            // though nothing in it actually changed.
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'npd2_catalog_skus' }, ({ new: row }) => {
-              if (row.delete_meta != null) {
-                set(s => ({ skus: s.skus.filter(sk => sk.id !== row.id) }), false, 'plm/skuDeletedRealtime')
-              } else if (row.image_processing === false && row.image_url) {
-                set(s => ({
-                  skus: s.skus.map(sk => sk.id === row.id
-                    ? { ...sk, image_url: row.image_url, image_processing: false }
-                    : sk
-                  )
-                }), false, 'plm/skuImageProcessed')
-              }
+              set(s => {
+                if (!s.skus.some(sk => sk.id === row.id)) return {}
+                if (row.delete_meta != null) {
+                  return { skus: s.skus.filter(sk => sk.id !== row.id) }
+                }
+                if (row.image_processing === false && row.image_url) {
+                  return {
+                    skus: s.skus.map(sk => sk.id === row.id
+                      ? { ...sk, image_url: row.image_url, image_processing: false }
+                      : sk
+                    ),
+                  }
+                }
+                return {}
+              }, false, 'plm/skuRealtime')
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'npd2_workspaces' }, ({ new: row }) => {
-              console.log('[PLM] workspace realtime event:', row.id, 'status:', row.status)
               set(s => {
-                const wsIds = s.skus.map(sk => sk.workspace_id).filter(Boolean)
-                const matched = wsIds.includes(row.id)
-                console.log('[PLM] store has', wsIds.length, 'workspace_ids, match:', matched)
+                const matched = s.skus.some(sk => sk.workspace_id === row.id)
+                if (!matched && s.activeWorkspace?.id !== row.id) return {}
                 return {
-                  skus: s.skus.map(sk =>
-                    sk.workspace_id === row.id
-                      ? { ...sk, workspace_status: row.status ?? sk.workspace_status, buyer_member_id: row.buyer_member_id ?? sk.buyer_member_id }
-                      : sk
-                  ),
+                  skus: matched
+                    ? s.skus.map(sk =>
+                        sk.workspace_id === row.id
+                          ? { ...sk, workspace_status: row.status ?? sk.workspace_status, buyer_member_id: row.buyer_member_id ?? sk.buyer_member_id }
+                          : sk
+                      )
+                    : s.skus,
                   activeWorkspace: s.activeWorkspace?.id === row.id
-                    ? { ...s.activeWorkspace, status: row.status ?? s.activeWorkspace.status }
+                    ? {
+                        ...s.activeWorkspace,
+                        status: row.status ?? s.activeWorkspace.status,
+                        // Keep group-chat membership live so someone who is added or removed
+                        // while they have the workspace open sees the Group Chat tab
+                        // lock/unlock on the spot — without this, inGroupChat only refreshes
+                        // on a full reopen, letting a removed member keep watching the thread.
+                        ...(row.group_chat_member_ids !== undefined && {
+                          group_chat_member_ids: row.group_chat_member_ids || [],
+                        }),
+                      }
                     : s.activeWorkspace,
                 }
               }, false, 'plm/workspaceRealtime')
+            })
+            // New rows can come from any of several permission buckets (own upload, shared
+            // supplier catalog, merchant-access-pair, explicit share, admin overlay) whose
+            // visibility rules live in fetchCatalog/refreshCatalog — rather than duplicate that
+            // filtering here, just re-run refreshCatalog, debounced so a bulk upload of many
+            // rows triggers one refetch instead of one per row.
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'npd2_catalog_skus' }, () => {
+              const prevTimer = get()._catalogInsertRefreshTimer
+              if (prevTimer) clearTimeout(prevTimer)
+              const timer = setTimeout(() => { get().refreshCatalog() }, 800)
+              set({ _catalogInsertRefreshTimer: timer }, false, 'plm/skuInsertRealtime')
             })
             .subscribe()
           set({ _catalogChannel: catalogChannel }, false, 'plm/catalogChannelSet')
@@ -794,7 +990,9 @@ export const usePlmStore = create(
       closeCatalogChannel: () => {
         const ch = get()._catalogChannel
         if (ch) supabase.removeChannel(ch)
-        set({ _catalogChannel: null }, false, 'plm/catalogChannelClosed')
+        const timer = get()._catalogInsertRefreshTimer
+        if (timer) clearTimeout(timer)
+        set({ _catalogChannel: null, _catalogInsertRefreshTimer: null }, false, 'plm/catalogChannelClosed')
       },
 
       refreshCatalog: async () => {
@@ -806,55 +1004,83 @@ export const usePlmStore = create(
           } else {
             const SKU_SELECT = '*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )'
             const [
-              { data: ownData },
-              { data: supplierData },
+              ownData,
+              supplierData,
               { data: pairRows },
               { data: explicitRows },
+              buyerScopedOrgs,
             ] = await Promise.all([
-              supabase.from('npd2_catalog_skus')
-                .select(SKU_SELECT)
-                .eq('npd2_catalog_uploads.created_by_member_id', memberId)
-                .eq('is_archived', false).is('delete_meta', null)
-                .order('created_at', { ascending: false }),
-              supabase.from('npd2_catalog_skus')
-                .select(SKU_SELECT)
-                .is('npd2_catalog_uploads.created_by_member_id', null)
-                .not('npd2_catalog_uploads.supplier_org_id', 'is', null)
-                .eq('is_archived', false).is('delete_meta', null)
-                .order('created_at', { ascending: false }),
+              fetchAllRows((from, to) =>
+                supabase.from('npd2_catalog_skus')
+                  .select(SKU_SELECT)
+                  .eq('npd2_catalog_uploads.created_by_member_id', memberId)
+                  .eq('is_archived', false).is('delete_meta', null)
+                  .order('created_at', { ascending: false })
+                  .range(from, to)
+              ),
+              fetchAllRows((from, to) =>
+                supabase.from('npd2_catalog_skus')
+                  .select(SKU_SELECT)
+                  .is('npd2_catalog_uploads.created_by_member_id', null)
+                  .not('npd2_catalog_uploads.supplier_org_id', 'is', null)
+                  .eq('is_archived', false).is('delete_meta', null)
+                  .order('created_at', { ascending: false })
+                  .range(from, to)
+              ),
               supabase.from('merchant_access_pairs')
                 .select('grantor_member_id')
                 .eq('grantee_member_id', memberId),
               supabase.from('npd2_catalog_access')
                 .select('catalog_upload_id')
                 .eq('member_id', memberId),
+              // See fetchCatalog's identical block above for why this bucket exists — buyer
+              // orgs this merchant is scoped to handle, so uploads tagged to one of those
+              // buyers (including a vendor's own self-upload) are surfaced here too.
+              resolveBuyerOrgsForMember(memberId),
             ])
 
             const grantorIds      = (pairRows    || []).map(r => r.grantor_member_id).filter(Boolean)
             const sharedUploadIds = (explicitRows || []).map(r => r.catalog_upload_id).filter(Boolean)
+            const buyerOrgIds     = (buyerScopedOrgs || []).map(o => o.id).filter(Boolean)
 
-            const [{ data: pairSkuData }, { data: explicitSkuData }] = await Promise.all([
+            const [pairSkuData, explicitSkuData, buyerScopedSkuData] = await Promise.all([
               grantorIds.length
-                ? supabase.from('npd2_catalog_skus')
-                    .select(SKU_SELECT)
-                    .in('npd2_catalog_uploads.created_by_member_id', grantorIds)
-                    .eq('is_archived', false).is('delete_meta', null)
-                    .order('created_at', { ascending: false })
-                : Promise.resolve({ data: [] }),
+                ? fetchAllRows((from, to) =>
+                    supabase.from('npd2_catalog_skus')
+                      .select(SKU_SELECT)
+                      .in('npd2_catalog_uploads.created_by_member_id', grantorIds)
+                      .eq('is_archived', false).is('delete_meta', null)
+                      .order('created_at', { ascending: false })
+                      .range(from, to)
+                  )
+                : Promise.resolve([]),
               sharedUploadIds.length
-                ? supabase.from('npd2_catalog_skus')
-                    .select(SKU_SELECT)
-                    .in('npd2_catalog_uploads.id', sharedUploadIds)
-                    .eq('is_archived', false).is('delete_meta', null)
-                    .order('created_at', { ascending: false })
-                : Promise.resolve({ data: [] }),
+                ? fetchAllRows((from, to) =>
+                    supabase.from('npd2_catalog_skus')
+                      .select(SKU_SELECT)
+                      .in('npd2_catalog_uploads.id', sharedUploadIds)
+                      .eq('is_archived', false).is('delete_meta', null)
+                      .order('created_at', { ascending: false })
+                      .range(from, to)
+                  )
+                : Promise.resolve([]),
+              buyerOrgIds.length
+                ? fetchAllRows((from, to) =>
+                    supabase.from('npd2_catalog_skus')
+                      .select(SKU_SELECT)
+                      .in('npd2_catalog_uploads.for_buyer_org_id', buyerOrgIds)
+                      .eq('is_archived', false).is('delete_meta', null)
+                      .order('created_at', { ascending: false })
+                      .range(from, to)
+                  )
+                : Promise.resolve([]),
             ])
 
             const seenIds = new Set()
             const merged = []
             for (const row of [
-              ...(ownData || []), ...(supplierData || []),
-              ...(pairSkuData || []), ...(explicitSkuData || []),
+              ...ownData, ...supplierData,
+              ...pairSkuData, ...explicitSkuData, ...buyerScopedSkuData,
             ]) {
               if (!seenIds.has(row.id)) { seenIds.add(row.id); merged.push(row) }
             }
@@ -862,28 +1088,36 @@ export const usePlmStore = create(
 
             const membership = useProfileStore.getState().orgMembership
             const isAdmin = membership?.role === 'admin' || membership?.role === 'owner'
+            const masterKeyActive = isPlmMasterKeyActiveFor(membership)
             let adminViewSkus = []
-            if (isAdmin && membership?.orgId) {
+            if ((isAdmin || isPlmMasterKeyEligible(membership)) && membership?.orgId) {
               const { data: merchMembers } = await supabase
                 .from('organization_members')
                 .select('id')
                 .eq('organization_id', membership.orgId)
-                .eq('department', 'merchandising')
+                .in('department', ['merchandising', 'tech'])
                 .neq('id', memberId)
               const merchIds = (merchMembers || []).map(m => m.id).filter(Boolean)
               if (merchIds.length) {
-                const adminSkuData = await fetchAllRows((from, to) =>
-                  supabase.from('npd2_catalog_skus')
-                    .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
-                    .filter('npd2_catalog_uploads.created_by_member_id', 'in', `(${merchIds.join(',')})`)
-                    .eq('is_archived', false)
-                    .is('delete_meta', null)
-                    .order('created_at', { ascending: false })
-                    .range(from, to)
+                // See fetchCatalog's identical block above for why this is chunked +
+                // parallel instead of one unchunked-IN-list sequential-paginated query.
+                const chunkResults = await Promise.all(
+                  chunkArray(merchIds, 100).map(chunk =>
+                    fetchAllRows((from, to) =>
+                      supabase.from('npd2_catalog_skus')
+                        .select('*, npd2_catalog_uploads!inner ( id, supplier, buyer, supplier_org_id, season, category, created_by_member_id, for_buyer_org_id, sku_source ), skus ( buyer_sku_ref )')
+                        .in('npd2_catalog_uploads.created_by_member_id', chunk)
+                        .eq('is_archived', false)
+                        .is('delete_meta', null)
+                        .order('created_at', { ascending: false })
+                        .range(from, to)
+                    )
+                  )
                 )
+                const adminSkuData = chunkResults.flat()
                 adminViewSkus = mapSkuRows(adminSkuData)
                   .filter(s => !seenIds.has(s.id))
-                  .map(s => ({ ...s, is_read_only: true }))
+                  .map(s => ({ ...s, is_read_only: !masterKeyActive }))
               }
             }
 
@@ -1060,6 +1294,19 @@ export const usePlmStore = create(
           return { sidebarCollapsed: next }
         }, false, 'plm/sidebar'),
 
+      // Summary Mode replaces the SKU grid with a pipeline-completion table (see
+      // PLMSummaryTable) — a page-level view toggle rather than a modal, so it lives here
+      // alongside sidebarCollapsed rather than as local state in whichever component
+      // happens to render the trigger button.
+      summaryMode: false,
+      toggleSummaryMode: () => set(s => ({ summaryMode: !s.summaryMode, buyerSummaryMode: false }), false, 'plm/summaryMode'),
+
+      // Buyer Summary — separate view from summaryMode above (see PLMBuyerSummary.jsx), opened
+      // via the sidebar's text "Summary" button rather than the SVG icon. Mutually exclusive
+      // with summaryMode since both replace the same content area.
+      buyerSummaryMode: false,
+      toggleBuyerSummaryMode: () => set(s => ({ buyerSummaryMode: !s.buyerSummaryMode, summaryMode: false }), false, 'plm/buyerSummaryMode'),
+
       // ── Selection ─────────────────────────────────────────────────────────────
       toggleSelect: (id) =>
         set(s => {
@@ -1091,9 +1338,13 @@ export const usePlmStore = create(
         set(s => ({ skus: s.skus.filter(sk => sk.id !== id) }), false, 'plm/deleteSku')
       },
 
+      // Only reached from the BulkEditModal trash button while filling in details
+      // for freshly-uploaded SKUs. ?fromUpload=1 tells the backend to hard-delete
+      // the row (freeing its auto_code) and log the orphaned Storage paths, rather
+      // than the usual recoverable soft-delete.
       deleteSkus: async (ids, role) => {
         await Promise.all(ids.map(id =>
-          api('DELETE', `/catalog/skus/${id}?role=${role}`)
+          api('DELETE', `/catalog/skus/${id}?role=${role}&fromUpload=1`)
         ))
         set(s => {
           const del = new Set(ids)
@@ -1183,9 +1434,15 @@ export const usePlmStore = create(
           const updatedSkus = s.skus.map(sk => {
             const patch = patches.find(p => p.id === sk.id)
             if (!patch) return sk
-            const { l, w, h, weight, material, measurement, buyerSkuRef, categoryId, categoryName, productionSkuId, tempSkuRef, ...rest } = patch.fields
+            const { l, w, h, weight, material, measurement, buyerSkuRef, categoryId, categoryName, productionSkuId, tempSkuRef, notesHtml, specImages, ...rest } = patch.fields
             return {
               ...sk, ...rest,
+              ...(notesHtml !== undefined && {
+                notes: notesHtml ? { html: notesHtml, images: Array.isArray(specImages) ? specImages : [] } : null,
+                spec_images: Array.isArray(specImages) && specImages.length
+                  ? specImages.map(url => ({ url, remark: null, origin: 'kaptr', created_at: new Date().toISOString() }))
+                  : (sk.spec_images || []),
+              }),
               ...(weight          !== undefined && { weight }),
               ...(l               !== undefined && { length:           l }),
               ...(w               !== undefined && { width:            w }),
@@ -1213,12 +1470,11 @@ export const usePlmStore = create(
         }
       },
 
-      updateVendorSkuRef: async (skuId, value) => {
-        const { error } = await supabase
-          .from('npd2_catalog_skus')
-          .update({ vendor_sku_ref: value || null })
-          .eq('id', skuId)
-        if (error) throw new Error(error.message)
+      // Goes through the backend (not a direct client->Supabase write) so the merchant/vendor
+      // role check can't be bypassed via the browser console — the UI's click-to-edit gate
+      // (WorkspaceModal.jsx) was only ever a cosmetic restriction, not real enforcement.
+      updateVendorSkuRef: async (skuId, value, workspaceId) => {
+        await api('PATCH', `/catalog-skus/${skuId}/vendor-ref`, { workspaceId, vendorSkuRef: value || null })
         set(s => {
           const skus = s.skus.map(sk => sk.id === skuId ? { ...sk, vendor_sku_ref: value || null } : sk)
           const activeSku = s.activeSku?.id === skuId ? { ...s.activeSku, vendor_sku_ref: value || null } : s.activeSku
@@ -1226,6 +1482,22 @@ export const usePlmStore = create(
         }, false, 'plm/updateVendorSkuRef')
         const ch = get()._realtimeChannel
         if (ch) ch.send({ type: 'broadcast', event: 'sku_update', payload: { id: skuId, fields: { vendor_sku_ref: value || null } } })
+      },
+
+      // Server generates + saves the ref in one round-trip (not computed client-side) — only
+      // the backend can reserve a candidate in memory before its DB check completes, closing
+      // the race window between two concurrent "Auto" clicks. Returns the generated ref.
+      generateVendorSkuRef: async (skuId, workspaceId) => {
+        const result = await api('POST', `/catalog-skus/${skuId}/vendor-ref/generate`, { workspaceId })
+        const value = result?.vendor_sku_ref || ''
+        set(s => {
+          const skus = s.skus.map(sk => sk.id === skuId ? { ...sk, vendor_sku_ref: value || null } : sk)
+          const activeSku = s.activeSku?.id === skuId ? { ...s.activeSku, vendor_sku_ref: value || null } : s.activeSku
+          return { skus, activeSku }
+        }, false, 'plm/generateVendorSkuRef')
+        const ch = get()._realtimeChannel
+        if (ch) ch.send({ type: 'broadcast', event: 'sku_update', payload: { id: skuId, fields: { vendor_sku_ref: value || null } } })
+        return value
       },
 
       // Refetch DB fields that the upload-status polling response may omit
@@ -1310,26 +1582,48 @@ export const usePlmStore = create(
       },
 
       // ── Workspace ─────────────────────────────────────────────────────────────
-      openSkuPanel: (sku) =>
-        set({ activeSku: sku, activeWorkspaceId: null, activeWorkspace: null, workspaceLoading: false }, false, 'plm/skuPanel'),
+      // initialTab: consumed once by WorkspaceModal (which clears it back to null after
+      // applying it) so callers like Summary Mode can jump straight to a specific tab
+      // (e.g. 'shipping') instead of landing on whatever defaultTabForStatus would pick.
+      initialTab: null,
+      // If the sku already has a workspace_id (true for every buyer-role sku, and for most
+      // merchant ones), load it directly instead of leaving that to WorkspaceModal's own
+      // auto-fetch effect — which only runs for role === 'merchant' (it re-looks-up the
+      // workspace by catalog_sku_id, a merchant-only affordance for the rare case where the
+      // client doesn't already know it). Without this, callers like PLMBuyerSummary's "Open"
+      // button silently opened nothing for buyer-role users.
+      openSkuPanel: (sku, initialTab = null) => {
+        set({ activeSku: sku, activeWorkspaceId: null, activeWorkspace: null, workspaceLoading: false, initialTab }, false, 'plm/skuPanel')
+        if (sku?.workspace_id) get().openWorkspace(sku.workspace_id, sku)
+      },
 
       openWorkspace: async (workspaceId, sku = null, { silent = false } = {}) => {
         const prev = get()._realtimeChannel
         if (prev) supabase.removeChannel(prev)
+        const prevGroup = get()._realtimeGroupChannel
+        if (prevGroup) supabase.removeChannel(prevGroup)
 
         // silent = true: already showing SKU data (merchant auto-load path),
         // don't flash a loading spinner — just fetch in background and merge in
         if (silent) {
-          set({ activeWorkspaceId: workspaceId, _realtimeChannel: null }, false, 'plm/wsOpenSilent')
+          set({ activeWorkspaceId: workspaceId, _realtimeChannel: null, _realtimeGroupChannel: null }, false, 'plm/wsOpenSilent')
         } else {
-          set({ activeSku: sku, activeWorkspaceId: workspaceId, workspaceLoading: true, activeWorkspace: null, _realtimeChannel: null }, false, 'plm/wsOpen')
+          set({ activeSku: sku, activeWorkspaceId: workspaceId, workspaceLoading: true, activeWorkspace: null, _realtimeChannel: null, _realtimeGroupChannel: null }, false, 'plm/wsOpen')
         }
         try {
           const [wsRes, cmRes, invRes, soRes] = await Promise.all([
             supabase.from('npd2_workspaces')
-              .select('*, npd2_catalog_skus!catalog_sku_id(id, auto_code, image_url, slide_index, description, material, finish, weight, length, width, height, measurement, dimensions, npd2_catalog_uploads(id, supplier, supplier_org_id, season, category, created_by_member_id))')
+              .select('*, npd2_catalog_skus!catalog_sku_id(id, auto_code, image_url, slide_index, description, material, finish, weight, length, width, height, measurement, dimensions, category, season, vendor_sku_ref, original_price, original_currency, npd2_catalog_uploads(id, supplier, supplier_org_id, season, category, created_by_member_id))')
               .eq('id', workspaceId).maybeSingle(),
-            supabase.from('npd2_comments').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: true }),
+            // Routed through the backend (not a direct Supabase query) so channel visibility
+            // (buyer/vendor/group) is enforced server-side — a direct client query would return
+            // every comment regardless of channel, relying only on UI filtering to hide the rest.
+            // Each comment now also carries a server-computed `is_unread` flag (workspace_last_seen
+            // read, not written, as part of this same request) — the client never independently
+            // fetches or compares raw timestamps for this anymore; see routes/plm.js.
+            api('GET', `/sku-workspaces/${workspaceId}/comments`)
+              .then(json => ({ data: json.comments || [] }))
+              .catch(err => { console.error('[PLM] comments fetch error:', err.message); return { data: [] } }),
             supabase.from('npd2_invites').select('id, email, role, status, member_id, expires_at, accepted_at').eq('workspace_id', workspaceId),
             supabase.from('npd2_sample_orders').select('*').eq('workspace_id', workspaceId).maybeSingle(),
           ])
@@ -1403,9 +1697,11 @@ export const usePlmStore = create(
             height:      skuRow.height,
             measurement: skuRow.measurement || 'cm',
             dimensions:  wsBase.dimensions  || skuRow.dimensions,
+            original_price:    skuRow.original_price ?? null,
+            original_currency: skuRow.original_currency || null,
             supplier:         wsBase.supplier    || upload.supplier,
-            season:           wsBase.season      || upload.season,
-            category:         wsBase.category    || upload.category,
+            season:           wsBase.season      || skuRow.season   || upload.season,
+            category:         wsBase.category    || skuRow.category || upload.category,
             supplier_org_id:   resolvedSupplierOrgId,
             // People
             merchant_name:        inviteNameMap[wsBase.merchant_member_id]   || null,
@@ -1425,6 +1721,7 @@ export const usePlmStore = create(
             supplier_invite_status: supplierInv?.status || null,
             buyer_invites:    invites.filter(i => i.role === 'buyer'                             && i.status !== 'revoked').map(i => ({ ...i, name: inviteNameMap[i.member_id] || emailNameMap[i.email] || null })),
             supplier_invites: invites.filter(i => (i.role === 'supplier' || i.role === 'vendor') && i.status !== 'revoked').map(i => ({ ...i, name: inviteNameMap[i.member_id] || emailNameMap[i.email] || null })),
+            qa_invites:       invites.filter(i => i.role === 'qa'                                && i.status !== 'revoked').map(i => ({ ...i, name: inviteNameMap[i.member_id] || emailNameMap[i.email] || null })),
             extra_buyer_member_ids:    invites.filter(i => i.role === 'buyer'                            && i.status === 'accepted' && i.member_id).map(i => i.member_id),
             extra_supplier_member_ids: invites.filter(i => (i.role === 'supplier' || i.role === 'vendor') && i.status === 'accepted' && i.member_id).map(i => i.member_id),
             npd_comments:      [],   // filled below after name lookup
@@ -1451,6 +1748,8 @@ export const usePlmStore = create(
                   : Promise.resolve({ data: null }),
               ])
               resolvedIsReadOnly = !pairRow && !explicitRow
+            } else if (upload.created_by_member_id !== currentMemberId && isPlmMasterKeyEligible(membership)) {
+              resolvedIsReadOnly = !isPlmMasterKeyActiveFor(membership)
             }
           }
 
@@ -1468,9 +1767,12 @@ export const usePlmStore = create(
             height:      skuRow.height,
             measurement: skuRow.measurement || 'cm',
             dimensions:  skuRow.dimensions,
+            original_price:    skuRow.original_price ?? null,
+            original_currency: skuRow.original_currency || null,
             supplier:    upload.supplier,
-            season:      upload.season,
-            category:    upload.category,
+            season:      skuRow.season   || upload.season,
+            category:    skuRow.category || upload.category,
+            vendor_sku_ref: skuRow.vendor_sku_ref || null,
             created_by_member_id: upload.created_by_member_id || null,
             workspace_id:     workspaceId,
             workspace_status: wsBase.status,
@@ -1499,13 +1801,72 @@ export const usePlmStore = create(
 
           if (workspace) workspace.npd_comments = (cmRes.data || []).map(enrich)
 
+          // Realtime guard mirroring the backend's filterCommentsForRole — the buyer/vendor
+          // broadcasts still travel over one shared workspace channel (unlike group chat, which
+          // has its own channel below), so a message meant for the other side would otherwise
+          // land in this viewer's local state (and thus the Media panel) the instant it's sent,
+          // even though the initial page-load fetch is already server-filtered.
+          const isCommentVisibleToViewer = (row) => {
+            if (viewerRole === 'merchant') return true
+            const isSystem = row.type === 'milestone' || row.type === 'field_change' || row.type === 'spec_summary'
+            // "Buyer/Vendor joined the workspace" is only the viewer's own side's business.
+            const meta = parseCommentMeta(row.metadata)
+            if (meta.event === 'invite_accepted' && meta.accepted_role) {
+              const joinSide = meta.accepted_role === 'buyer' ? 'buyer' : 'vendor'
+              const viewerSide = viewerRole === 'buyer' ? 'buyer' : 'vendor'
+              if (joinSide !== viewerSide) return false
+            }
+            if (row.channel === 'group') {
+              // Check LIVE membership, not the snapshot taken when the workspace was opened —
+              // otherwise a member removed mid-session keeps receiving new group messages
+              // (and having them land in the Media panel) until they reopen. Already-loaded
+              // history from their membership window stays; only post-removal rows are blocked.
+              const liveGroupIds = get().activeWorkspace?.id === workspaceId
+                ? (get().activeWorkspace.group_chat_member_ids || wsBase.group_chat_member_ids || [])
+                : (wsBase.group_chat_member_ids || [])
+              return liveGroupIds.includes(myMemberId)
+            }
+            // QA never sees Buyer/Vendor Activity — the group-channel check above already
+            // handled the one channel they DO see, so any non-group row reaching this point is
+            // out of scope for them. Explicit early return rather than falling into the
+            // vendor-shaped default below, which would otherwise leak vendor-channel content.
+            if (viewerRole === 'qa') return false
+            if (viewerRole === 'buyer')
+              return row.type === 'spec_summary' || row.role === 'buyer' || (row.role === 'merchant' && (row.channel === 'buyer' || isSystem))
+            return row.role === 'supplier' || (row.role === 'merchant' && (row.channel === 'vendor' || row.channel === 'supplier'))
+          }
+
           const addComment = (row) => {
-            const named = { ...mapComment(row), author_name: get()._memberNameMap[row.author_member_id] || row.author_name || null }
+            if (!isCommentVisibleToViewer(row)) return
+            // is_unread is normally a server-computed flag baked in by the initial GET .../comments
+            // fetch (see routes/plm.js) — a row arriving live via realtime never goes through that
+            // endpoint, so without this it would silently render as "read" (no badge, no divider)
+            // even though the viewer has never actually seen it. Same author-check the backend
+            // uses, covering every comment type — any change is something to catch up on.
+            const named = { ...mapComment(row), author_name: get()._memberNameMap[row.author_member_id] || row.author_name || null, is_unread: row.author_member_id !== myMemberId }
             set(s => {
               if (!s.activeWorkspace) return {}
               if (s.activeWorkspace.npd_comments?.some(c => c.id === named.id)) return {}
               return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...(s.activeWorkspace.npd_comments || []), named] } }
             }, false, 'plm/newComment')
+          }
+
+          // In-place replace of an already-loaded comment row (edited message — see editComment).
+          // No-ops if the comment isn't currently in view; keeps the existing author_name when
+          // the incoming row doesn't carry one.
+          const updateCommentRow = (row) => {
+            if (!row) return
+            const named = { ...mapComment(row), author_name: get()._memberNameMap[row.author_member_id] || row.author_name || null }
+            set(s => {
+              const list = s.activeWorkspace?.npd_comments || []
+              if (!list.some(c => c.id === named.id)) return {}
+              return {
+                activeWorkspace: {
+                  ...s.activeWorkspace,
+                  npd_comments: list.map(c => c.id === named.id ? { ...c, ...named, author_name: named.author_name || c.author_name } : c),
+                },
+              }
+            }, false, 'plm/editComment')
           }
 
           const handleVideoCallMilestone = (row, meta, { playSound = true } = {}) => {
@@ -1568,9 +1929,27 @@ export const usePlmStore = create(
               event: 'INSERT', schema: 'public', table: 'npd2_comments', filter: `workspace_id=eq.${workspaceId}`,
             }, (payload) => {
               const row = payload.new
-              if (!row || row.type !== 'milestone') return
+              if (!row) return
               const meta = parseCommentMeta(row.metadata)
-              if (meta.event?.startsWith('video_call_')) handleVideoCallMilestone(row, meta)
+              if (row.type === 'milestone' && meta.event?.startsWith('video_call_')) {
+                handleVideoCallMilestone(row, meta)
+                return
+              }
+              // Server-inserted rows that nothing broadcasts over this channel — an invite
+              // being accepted ("Buyer/Vendor joined the workspace"), status/field milestones,
+              // spec summaries, a message sent from a context without our realtime channel.
+              // Without this they only showed up on a manual refresh (or, for the join case,
+              // only when the workspace *row* also changed). addComment dedups by id, so this
+              // is harmless alongside the explicit `broadcast: 'comment'` path below.
+              addComment(row)
+            })
+            .on('postgres_changes', {
+              event: 'UPDATE', schema: 'public', table: 'npd2_comments', filter: `workspace_id=eq.${workspaceId}`,
+            }, (payload) => {
+              // Catches edited messages (metadata.edits / body changed) from any context —
+              // updateCommentRow no-ops if the row isn't already loaded. Broadcast 'comment_edit'
+              // below is the fast path; this is the backstop.
+              if (payload.new) updateCommentRow(payload.new)
             })
             .on('broadcast', { event: 'video_call' }, ({ payload }) => {
               const myId = useProfileStore.getState().orgMembership?.memberId
@@ -1601,6 +1980,7 @@ export const usePlmStore = create(
               }, false, 'plm/incomingCallBroadcast')
             })
             .on('broadcast', { event: 'comment' }, ({ payload }) => addComment(payload))
+            .on('broadcast', { event: 'comment_edit' }, ({ payload }) => updateCommentRow(payload))
             .on('broadcast', { event: 'workspace_status' }, ({ payload }) => {
               set(s => {
                 if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
@@ -1636,6 +2016,23 @@ export const usePlmStore = create(
             })
             .subscribe()
 
+          // Group-chat broadcasts go over a SEPARATE realtime channel, subscribed to only by
+          // the merchant and whoever's in group_chat_member_ids — so someone not in the group
+          // never receives that content live, instead of receiving it and just having the UI
+          // hide it. (The main `ws-chat:${workspaceId}` channel above is shared by everyone on
+          // the workspace, which is fine for buyer/vendor system comments but not for group.)
+          const myMemberId = useProfileStore.getState().orgMembership?.memberId
+          const viewerRole = wsBase.buyer_member_id === myMemberId ? 'buyer'
+            : wsBase.supplier_member_id === myMemberId ? 'supplier'
+            : (invites.find(i => i.member_id === myMemberId && i.status === 'accepted')?.role || 'merchant')
+          const canSeeGroupChat = viewerRole === 'merchant' || (wsBase.group_chat_member_ids || []).includes(myMemberId)
+          const groupChannel = canSeeGroupChat
+            ? supabase.channel(`ws-group:${workspaceId}`)
+                .on('broadcast', { event: 'comment' }, ({ payload }) => addComment(payload))
+                .on('broadcast', { event: 'comment_edit' }, ({ payload }) => updateCommentRow(payload))
+                .subscribe()
+            : null
+
           // Restore incoming-call banner if user opens workspace mid-call
           let incomingRestore = null
           if (workspace?.video_room_name && !get().activeVideoCall) {
@@ -1655,12 +2052,24 @@ export const usePlmStore = create(
             }
           }
 
+          // Bail if the user closed the workspace (or opened a different one) while this
+          // fetch was in flight — e.g. tapping Back on a slow mobile connection before the
+          // request resolves. Without this check, the fetch still lands and unconditionally
+          // re-sets activeSku/activeWorkspace, silently reopening the workspace the user just
+          // closed (or clobbering a newer open with stale data).
+          if (get().activeWorkspaceId !== workspaceId) {
+            supabase.removeChannel(channel)
+            if (groupChannel) supabase.removeChannel(groupChannel)
+            return
+          }
+
           set(s => ({
             // In silent mode activeSku is already set — only update if resolved
             ...((!silent || resolvedSku) && { activeSku: resolvedSku }),
             activeWorkspace:  workspace,
             workspaceLoading: false,
             _realtimeChannel: channel,
+            _realtimeGroupChannel: groupChannel,
             _memberNameMap:   memberNameMap,
             ...(incomingRestore && { incomingVideoCall: incomingRestore }),
             ...(workspace && {
@@ -1673,16 +2082,12 @@ export const usePlmStore = create(
             }),
           }), false, 'plm/wsLoaded')
 
-          // Record that this member has seen this workspace
+          // Record that this member has seen this workspace — deliberately AFTER the comments
+          // fetch above resolves, so that request's server-computed is_unread flags are always
+          // read against the pre-this-write value, never a value this same open just clobbered.
+          api('PATCH', `/sku-workspaces/${workspaceId}/mark-seen`).catch(err => console.error('[last_seen] mark-seen failed:', err.message))
           const memberId = useProfileStore.getState().orgMembership?.memberId
           if (memberId) {
-            supabase.from('workspace_last_seen').upsert(
-              { member_id: memberId, workspace_id: workspaceId, seen_at: new Date().toISOString() },
-              { onConflict: 'member_id,workspace_id' }
-            ).then(({ error }) => {
-              if (error) console.error('[last_seen] upsert failed:', error.message, error.details, error.hint)
-            })
-
             if (!get().activeVideoCall) {
               const session = useAuthStore.getState().session
               fetch(`${API_BASE}/plm/sku-workspaces/${workspaceId}/video-call/pending?memberId=${encodeURIComponent(memberId)}`, {
@@ -1705,16 +2110,21 @@ export const usePlmStore = create(
             }
           }
         } catch {
-          set({ workspaceLoading: false }, false, 'plm/wsError')
+          // Same staleness check as above — don't clear workspaceLoading if a newer open (or
+          // close) has already superseded this one; that would stop a still-in-flight fetch's
+          // spinner early and leave the modal looking stuck with no data.
+          if (get().activeWorkspaceId === workspaceId) set({ workspaceLoading: false }, false, 'plm/wsError')
         }
       },
 
       closeWorkspace: () => {
         const ch = get()._realtimeChannel
         if (ch) supabase.removeChannel(ch)
+        const groupCh = get()._realtimeGroupChannel
+        if (groupCh) supabase.removeChannel(groupCh)
         set({
           activeSku: null, activeWorkspaceId: null, activeWorkspace: null, workspaceLoading: false,
-          _realtimeChannel: null, incomingVideoCall: null,
+          _realtimeChannel: null, _realtimeGroupChannel: null, incomingVideoCall: null,
         }, false, 'plm/wsClose')
       },
 
@@ -1777,7 +2187,7 @@ export const usePlmStore = create(
             if (newInv) {
               set(s => {
                 if (!s.activeWorkspace || s.activeWorkspace.id !== activeId) return {}
-                const listKey = role === 'buyer' ? 'buyer_invites' : 'supplier_invites'
+                const listKey = role === 'buyer' ? 'buyer_invites' : role === 'qa' ? 'qa_invites' : 'supplier_invites'
                 const already = (s.activeWorkspace[listKey] || []).some(i => i.id === newInv.id)
                 if (already) return {}
                 return { activeWorkspace: { ...s.activeWorkspace, [listKey]: [...(s.activeWorkspace[listKey] || []), newInv] } }
@@ -1818,11 +2228,16 @@ export const usePlmStore = create(
 
       // List registered members of an org — used to populate buyer/vendor invite
       // pickers so invites can only be sent to people already registered in that org.
-      fetchOrgMembers: async (orgId) => {
+      // `department`, when passed (e.g. 'qa' for the QA invite picker), narrows to just that
+      // department — the backend still re-verifies this independently at invite-send time
+      // (emailBelongsToQaDept in routes/plm.js), this is only for a correctly-scoped picker.
+      fetchOrgMembers: async (orgId, department) => {
         if (!orgId) return []
-        const { data } = await supabase
+        let query = supabase
           .from('organization_members').select('id, full_name, email')
-          .eq('organization_id', orgId).not('email', 'is', null).order('full_name')
+          .eq('organization_id', orgId).not('email', 'is', null).is('removed_at', null).order('full_name')
+        if (department) query = query.eq('department', department)
+        const { data } = await query
         return data || []
       },
 
@@ -1840,7 +2255,7 @@ export const usePlmStore = create(
           if (newInv) {
             set(s => {
               if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
-              const listKey = role === 'buyer' ? 'buyer_invites' : 'supplier_invites'
+              const listKey = role === 'buyer' ? 'buyer_invites' : role === 'qa' ? 'qa_invites' : 'supplier_invites'
               // Replace by email (handles renewal case where old invite was deleted and new one created)
               const without = (s.activeWorkspace[listKey] || []).filter(i => i.email !== newInv.email)
               return { activeWorkspace: { ...s.activeWorkspace, [listKey]: [...without, newInv] } }
@@ -1850,11 +2265,21 @@ export const usePlmStore = create(
         return result
       },
 
+      // Read-only "I forgot to copy the link" recovery — returns the invite's EXISTING token
+      // without touching the row (unlike addWorkspaceInvite, which always mints a fresh token).
+      // A bulk invite shares one token across every workspace in that batch, so this also
+      // returns every other workspace sharing it, so the merchant can see the full blast
+      // radius of the link (and choose to revoke+reinvite for just this one) before handing
+      // it out again.
+      revealInviteLink: async (workspaceId, inviteId) => {
+        return api('GET', `/sku-workspaces/${workspaceId}/invites/${inviteId}/link`)
+      },
+
       revokeInvite: async (workspaceId, inviteId) => {
         const result = await api('PATCH', `/sku-workspaces/${workspaceId}/invites/${inviteId}/revoke`)
         set(s => {
           if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
-          const listKey = result?.role === 'buyer' ? 'buyer_invites' : 'supplier_invites'
+          const listKey = result?.role === 'buyer' ? 'buyer_invites' : result?.role === 'qa' ? 'qa_invites' : 'supplier_invites'
           return {
             activeWorkspace: {
               ...s.activeWorkspace,
@@ -1864,15 +2289,50 @@ export const usePlmStore = create(
         }, false, 'plm/revokeInvite')
       },
 
+      // Merchant-only: sets exactly which invited buyer(s)/supplier(s) can see and post in
+      // the workspace's Group Chat tab. Server clamps memberIds to people actually on the
+      // workspace, so we trust the returned array back into state rather than the input.
+      //
+      // The PATCH also inserts a "joined Group Chat" milestone server-side for anyone newly
+      // added — inserting a row alone doesn't push it to any connected client, so it's appended
+      // locally here AND broadcast over the group realtime channel, exactly like sendComment
+      // broadcasts a freshly-sent message, so it shows up live for the actor and every other
+      // viewer without needing to reopen the workspace.
+      setGroupChatMembers: async (workspaceId, memberIds) => {
+        const result = await api('PATCH', `/sku-workspaces/${workspaceId}/group-chat-members`, { memberIds })
+        set(s => {
+          if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+          const known = new Set((s.activeWorkspace.npd_comments || []).map(c => c.id))
+          const newMilestones = (result?.milestones || []).filter(m => !known.has(m.id)).map(m => ({
+            ...mapComment(m), author_name: get()._memberNameMap[m.author_member_id] || null,
+          }))
+          return {
+            activeWorkspace: {
+              ...s.activeWorkspace,
+              group_chat_member_ids: result?.workspace?.group_chat_member_ids || [],
+              npd_comments: [...(s.activeWorkspace.npd_comments || []), ...newMilestones],
+            },
+          }
+        }, false, 'plm/setGroupChatMembers')
+        const ch = get()._realtimeGroupChannel
+        if (ch) (result?.milestones || []).forEach(m => ch.send({ type: 'broadcast', event: 'comment', payload: m }))
+      },
+
       // Renders the message + its local file previews immediately, then uploads
       // in the background so the composer never blocks on network/upload time.
-      sendComment: async (workspaceId, body, channel, files = [], replyTo = null) => {
+      // format: pass 'html' for a message sent from the rich-text ("Notes") composer — the
+      // backend re-sanitizes and stores it as metadata.format so the renderer knows to treat
+      // body as formatted HTML instead of plain text.
+      sendComment: async (workspaceId, body, channel, files = [], replyTo = null, format = null) => {
         const membership = useProfileStore.getState().orgMembership
         const memberId = membership?.memberId
         const myName   = membership?.fullName || null
-        // Store only the fields needed to render the quoted bubble
+        // Store only the fields needed to render the quoted bubble. quoted_thumbs (plural) is
+        // the multi-photo strip shown when replying to a multi-attachment message — persisted
+        // here (not just used live in the composer) so the in-thread quote box can show the
+        // same strip after the reply is actually sent, not just while composing it.
         const replyPayload = replyTo
-          ? { id: replyTo.id, body: replyTo.body, author_name: replyTo.author_name, role: replyTo.role, quoted_thumb: replyTo.quoted_thumb || null }
+          ? { id: replyTo.id, body: replyTo.body, author_name: replyTo.author_name, role: replyTo.role, quoted_thumb: replyTo.quoted_thumb || null, quoted_thumbs: replyTo.quoted_thumbs || [] }
           : null
 
         const tempId = `temp-${memberId || 'anon'}-${get()._tempCommentSeq || 0}`
@@ -1883,14 +2343,16 @@ export const usePlmStore = create(
         }))
         const optimistic = {
           id: tempId, body, channel, role: membership?.orgType || null,
-          author_name: myName, created_at: new Date().toISOString(),
+          author_member_id: memberId, author_name: myName, created_at: new Date().toISOString(),
           attachments: localAttachments,
+          metadata: format === 'html' ? { format: 'html' } : null,
           reply_to: replyPayload ? JSON.stringify(replyPayload) : null,
           quoted: replyPayload?.body || null, quoted_author: replyPayload?.author_name || replyPayload?.role || null,
           quoted_id: replyPayload?.id || null, quoted_thumb: replyPayload?.quoted_thumb || null,
+          quoted_thumbs: replyPayload?.quoted_thumbs || [],
           _uploading: files.length > 0,
           _uploadPct: 0, _uploadedBytes: 0, _uploadTotalBytes: files.reduce((sum, f) => sum + f.size, 0),
-          _retry: { body, channel, files, replyTo },
+          _retry: { body, channel, files, replyTo, format },
         }
 
         set(s => {
@@ -1921,6 +2383,7 @@ export const usePlmStore = create(
             fd.append('body', body)
             fd.append('memberId', memberId)
             fd.append('channel', channel)
+            if (format) fd.append('format', format)
             if (replyPayload) fd.append('reply_to', JSON.stringify(replyPayload))
             files.forEach(f => fd.append('files', f))
             let lastPct = -1
@@ -1931,7 +2394,7 @@ export const usePlmStore = create(
               replaceTemp(c => ({ ...c, _uploadedBytes: loaded, _uploadTotalBytes: total, _uploadPct: pct }))
             })
           } else {
-            result = await api('POST', `/sku-workspaces/${workspaceId}/comments`, { body, memberId, channel, reply_to: replyPayload })
+            result = await api('POST', `/sku-workspaces/${workspaceId}/comments`, { body, memberId, channel, format, reply_to: replyPayload })
           }
           if (result?.comment) {
             const enriched = { ...mapComment(result.comment), author_name: myName }
@@ -1944,8 +2407,10 @@ export const usePlmStore = create(
             replaceTemp(() => enriched)
             revokeLocalUrls()
 
-            // Broadcast enriched comment (includes author_name) to other participants
-            const ch = get()._realtimeChannel
+            // Broadcast enriched comment (includes author_name) to other participants — group
+            // channel goes over its own realtime channel (only group members are subscribed to
+            // it), everything else stays on the shared workspace channel.
+            const ch = channel === 'group' ? get()._realtimeGroupChannel : get()._realtimeChannel
             if (ch) ch.send({ type: 'broadcast', event: 'comment', payload: enriched })
           }
           return result
@@ -1955,6 +2420,82 @@ export const usePlmStore = create(
             ...c, _uploading: false, _failed: true, _error: err.message,
             attachments: c.attachments.map(a => ({ ...a, uploading: false })),
           }))
+          throw err
+        }
+      },
+
+      // Edits an already-sent chat message in place. The prior text is pushed onto
+      // metadata.edits (a { body, at } trail, oldest first) and `body` becomes the new text —
+      // mirrors the backend so the optimistic bubble shows the struck-through history right
+      // away. Only the author can edit (enforced server-side too).
+      editComment: async (workspaceId, commentId, newBody, removedAttachmentUrls = []) => {
+        // No `!text` bail here — an attachment-only message (no caption) has an empty body by
+        // design, and a pure attachment-removal edit on it must still go through.
+        const text = (newBody || '').trim()
+        const list = get().activeWorkspace?.npd_comments || []
+        const target = list.find(c => c.id === commentId)
+        if (!target) return
+
+        const removeSet       = new Set(removedAttachmentUrls)
+        const bodyChanged      = text !== (target.body || '').trim()
+        const prevAttachments  = target.attachments || []
+        const now              = new Date().toISOString()
+        // Attachment entries can be plain strings or JSON-stringified strings, not just real
+        // objects (see plmAttachments.js) — url/removed lookups go through the shared helpers
+        // so a non-object entry's removal isn't silently dropped.
+        const newAttachments   = removeSet.size
+          ? prevAttachments.map(a => (removeSet.has(getAttachmentUrl(a)) && !isAttachmentRemoved(a)) ? { ...normalizeAttachment(a), removed: true, removedAt: now } : a)
+          : prevAttachments
+        const attachmentsChanged = JSON.stringify(newAttachments) !== JSON.stringify(prevAttachments)
+        if (!bodyChanged && !attachmentsChanged) return
+        // A message must always end up with text or a live attachment — never send an edit
+        // that would leave it with neither (mirrors the same rule sendComment enforces on create).
+        if (!text && newAttachments.every(a => isAttachmentRemoved(a))) {
+          get().toast?.('Message needs text or an attachment')
+          return
+        }
+
+        const membership = useProfileStore.getState().orgMembership
+        const memberId   = membership?.memberId
+        const myName     = membership?.fullName || null
+
+        const prevMeta  = (target.metadata && typeof target.metadata === 'object') ? target.metadata : {}
+        const prevEdits = Array.isArray(prevMeta.edits) ? prevMeta.edits : []
+        // A pure attachment removal doesn't need a text snapshot — only push one when the
+        // text itself changed.
+        const optimisticMeta = {
+          ...prevMeta,
+          edits: bodyChanged
+            ? [...prevEdits, { body: target.body || '', at: prevMeta.edited_at || target.created_at }]
+            : prevEdits,
+          edited_at: now,
+        }
+
+        const applyLocal = (patch) => set(s => {
+          if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+          return {
+            activeWorkspace: {
+              ...s.activeWorkspace,
+              npd_comments: (s.activeWorkspace.npd_comments || []).map(c => c.id === commentId ? { ...c, ...patch } : c),
+            },
+          }
+        }, false, 'plm/editCommentLocal')
+
+        const snapshot = { body: target.body, metadata: target.metadata, attachments: target.attachments }
+        applyLocal({ body: text, metadata: optimisticMeta, attachments: newAttachments })
+
+        try {
+          const result = await api('PATCH', `/sku-workspaces/${workspaceId}/comments/${commentId}`, { body: text, memberId, removedAttachmentUrls: [...removeSet] })
+          if (result?.comment) {
+            const enriched = { ...mapComment(result.comment), author_name: myName || undefined }
+            applyLocal({ ...enriched, author_name: enriched.author_name || target.author_name })
+            const ch = target.channel === 'group' ? get()._realtimeGroupChannel : get()._realtimeChannel
+            if (ch) ch.send({ type: 'broadcast', event: 'comment_edit', payload: { ...enriched, author_name: enriched.author_name || target.author_name || myName } })
+          }
+          return result
+        } catch (err) {
+          applyLocal(snapshot)          // revert
+          get().toast?.(err.message || 'Could not edit message')
           throw err
         }
       },
@@ -1969,8 +2510,8 @@ export const usePlmStore = create(
           if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
           return { activeWorkspace: { ...s.activeWorkspace, npd_comments: (s.activeWorkspace.npd_comments || []).filter(c => c.id !== tempId) } }
         }, false, 'plm/retryRemoveFailed')
-        const { body, channel, files, replyTo } = failed._retry
-        get().sendComment(workspaceId, body, channel, files, replyTo).catch(() => {})
+        const { body, channel, files, replyTo, format } = failed._retry
+        get().sendComment(workspaceId, body, channel, files, replyTo, format).catch(() => {})
       },
 
       removeFailedComment: (workspaceId, tempId) => {
@@ -1982,11 +2523,39 @@ export const usePlmStore = create(
         }, false, 'plm/removeFailedComment')
       },
 
+      // Uploads immediately (not deferred to Send) so the rich-text composer can insert a real
+      // hosted <img> inline at the cursor while still composing. Returns { url, path } — path
+      // is kept by the caller so deleteInlineImage can clean it up if the note gets discarded
+      // before sending.
+      uploadInlineImage: async (workspaceId, file) => {
+        const fd = new FormData()
+        fd.append('file', file)
+        return apiUpload(`/sku-workspaces/${workspaceId}/inline-image`, fd)
+      },
+
+      deleteInlineImage: async (workspaceId, path) => {
+        return api('DELETE', `/sku-workspaces/${workspaceId}/inline-image`, { path })
+      },
+
+      // Workspace-less inline-image upload — for the Notes editor in the Create-SKU flow,
+      // where no workspace exists yet. Backend stores to a catalog-notes staging path and
+      // returns { url, path }. The url is what gets embedded in the note HTML and, on
+      // create, mirrored into the SKU's spec_images (origin 'kaptr').
+      uploadNoteImage: async (file) => {
+        const memberId = useProfileStore.getState().orgMembership?.memberId
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('memberId', memberId || '')
+        return apiUpload('/catalog/note-image', fd)
+      },
+
       // Sends only the image_url sub-field as a patch (not the whole brief) — same
       // merge-safe pattern as saveBrief, so pinning an image can't clobber a concurrent
       // editor's unrelated brief changes, and the server's response is authoritative.
       pinImage: async (workspaceId, imageUrl) => {
         const memberId = useProfileStore.getState().orgMembership?.memberId
+        const preSave  = get().activeWorkspace
+        const knownIds = new Set(preSave?.id === workspaceId ? preSave.npd_comments.map(c => c.id) : [])
         const result    = await api('PATCH', `/sku-workspaces/${workspaceId}`, { buyer_brief: { image_url: imageUrl ?? null }, memberId })
         const buyer_brief = result.workspace?.buyer_brief
         set(s => {
@@ -1995,6 +2564,18 @@ export const usePlmStore = create(
         }, false, 'plm/pinImage')
         const ch = get()._realtimeChannel
         if (ch) ch.send({ type: 'broadcast', event: 'buyer_brief', payload: { buyer_ref: get().activeWorkspace?.buyer_ref ?? null, buyer_brief } })
+
+        const enriched = await fetchNewComments(workspaceId, 'milestone', knownIds, get()._memberNameMap)
+        if (enriched.length) {
+          set(s => {
+            if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+            const existing = new Set(s.activeWorkspace.npd_comments.map(c => c.id))
+            const toAdd = enriched.filter(c => !existing.has(c.id))
+            if (!toAdd.length) return {}
+            return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
+          }, false, 'plm/pinImageMilestone')
+          if (ch) enriched.forEach(c => ch.send({ type: 'broadcast', event: 'comment', payload: c }))
+        }
       },
 
       removeSpecImage: async (workspaceId, imageUrl) => {
@@ -2054,6 +2635,8 @@ export const usePlmStore = create(
       // silently falls back to 'copy' if replaceUrl is pinned as the buyer-brief or
       // product image, so a pinned original is never touched.
       saveReferenceMediaEdit: async (workspaceId, blob, { mode = 'copy', replaceUrl } = {}) => {
+        const preSave  = get().activeWorkspace
+        const knownIds = new Set(preSave?.id === workspaceId ? preSave.npd_comments.map(c => c.id) : [])
         const fd = new FormData()
         fd.append('image', blob, `edited-${Date.now()}.png`)
         fd.append('mode', mode)
@@ -2063,16 +2646,47 @@ export const usePlmStore = create(
           if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
           return { activeWorkspace: { ...s.activeWorkspace, reference_media: json.reference_media } }
         }, false, 'plm/saveReferenceMediaEdit')
+
+        const enriched = await fetchNewComments(workspaceId, 'milestone', knownIds, get()._memberNameMap)
+        if (enriched.length) {
+          set(s => {
+            if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+            const existing = new Set(s.activeWorkspace.npd_comments.map(c => c.id))
+            const toAdd = enriched.filter(c => !existing.has(c.id))
+            if (!toAdd.length) return {}
+            return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
+          }, false, 'plm/referenceMediaMilestone')
+          const ch = get()._realtimeChannel
+          if (ch) enriched.forEach(c => ch.send({ type: 'broadcast', event: 'comment', payload: c }))
+        }
         return json
       },
 
-      setSkuImageFromUrl: async (skuId, imageUrl) => {
-        const { image_url: newUrl } = await api('PATCH', `/catalog/skus/${skuId}/image-from-url`, { imageUrl })
+      setSkuImageFromUrl: async (skuId, imageUrl, workspaceId) => {
+        const memberId = useProfileStore.getState().orgMembership?.memberId
+        const role     = useProfileStore.getState().orgMembership?.orgType
+        const preSave  = get().activeWorkspace
+        const knownIds = new Set(workspaceId && preSave?.id === workspaceId ? preSave.npd_comments.map(c => c.id) : [])
+        await api('PATCH', `/catalog/skus/${skuId}/image-from-url`, { imageUrl, workspaceId, memberId, role })
         set(s => ({
           skus: s.skus.map(sk => sk.id === skuId ? { ...sk, image_url: imageUrl, image_processing: false } : sk),
           ...(s.activeSku?.id === skuId && { activeSku: { ...s.activeSku, image_url: imageUrl, image_processing: false } }),
           ...(s.activeWorkspace?.catalog_sku_id === skuId && { activeWorkspace: { ...s.activeWorkspace, image_url: imageUrl } }),
         }), false, 'plm/setSkuImageFromUrl')
+
+        if (!workspaceId) return
+        const enriched = await fetchNewComments(workspaceId, 'milestone', knownIds, get()._memberNameMap)
+        if (enriched.length) {
+          set(s => {
+            if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+            const existing = new Set(s.activeWorkspace.npd_comments.map(c => c.id))
+            const toAdd = enriched.filter(c => !existing.has(c.id))
+            if (!toAdd.length) return {}
+            return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
+          }, false, 'plm/setSkuImageMilestone')
+          const ch = get()._realtimeChannel
+          if (ch) enriched.forEach(c => ch.send({ type: 'broadcast', event: 'comment', payload: c }))
+        }
       },
 
       // briefFieldsPatch should contain ONLY the sub-fields the user actually edited (a diff
@@ -2099,8 +2713,12 @@ export const usePlmStore = create(
         const finalBuyerRef   = updatedWs.buyer_ref
         const finalBuyerBrief = updatedWs.buyer_brief
 
-        // Fetch field_change comments the backend just inserted and append any not already known
-        const enriched = await fetchNewComments(workspaceId, 'field_change', knownIds, get()._memberNameMap)
+        // Fetch field_change comments the backend just inserted and append any not already known.
+        // Also 'milestone' — pinning/unpinning the brief image via this same endpoint logs a
+        // buyer_brief_image_set/unset milestone, and that was being dropped here: only
+        // field_change was fetched, so an image pin done through Save Brief never showed up in
+        // Activity until the workspace was reloaded from scratch.
+        const enriched = await fetchNewComments(workspaceId, ['field_change', 'milestone'], knownIds, get()._memberNameMap)
 
         if (enriched.length) {
           set(s => {
@@ -2110,14 +2728,14 @@ export const usePlmStore = create(
             if (!toAdd.length) return {}
             return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
           }, false, 'plm/briefLogs')
-          // Broadcast field_change comments + updated brief to other participants
+          // Broadcast field_change/milestone comments + updated brief to other participants
           const ch = get()._realtimeChannel
           if (ch) {
             enriched.forEach(c => ch.send({ type: 'broadcast', event: 'comment', payload: c }))
             ch.send({ type: 'broadcast', event: 'buyer_brief', payload: { buyer_ref: finalBuyerRef, buyer_brief: finalBuyerBrief } })
           }
         } else {
-          // No field_change comments but still broadcast brief update
+          // No field_change/milestone comments but still broadcast brief update
           const ch = get()._realtimeChannel
           if (ch) ch.send({ type: 'broadcast', event: 'buyer_brief', payload: { buyer_ref: finalBuyerRef, buyer_brief: finalBuyerBrief } })
         }
@@ -2148,32 +2766,42 @@ export const usePlmStore = create(
         const findingsCh = get()._realtimeChannel
         if (findingsCh && result.sampleOrder) findingsCh.send({ type: 'broadcast', event: 'sample_order', payload: result.sampleOrder })
 
+        // Broadcast updated sample order so other participants see findings instantly
+        const ch = get()._realtimeChannel
+        if (ch && result.sampleOrder) ch.send({ type: 'broadcast', event: 'sample_order', payload: result.sampleOrder })
+
         // field_change/milestone comments for what changed are now logged server-side by the
         // PATCH /sku-sample-orders/:id handler itself (grouped per UI row, e.g. one "Actual
         // L×W×H" line instead of three) — the postgres_changes subscription on npd2_comments
         // picks those up automatically, so this used to also insert its own separate, ungrouped
         // set of field_change rows directly into Supabase, which just produced duplicates.
-
-        const milestoneEnriched = await fetchNewComments(workspaceId, ['milestone', 'field_change'], knownIds, get()._memberNameMap)
-
-        if (milestoneEnriched.length) {
-          set(s => {
-            if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
-            const existing = new Set(s.activeWorkspace.npd_comments.map(c => c.id))
-            const toAdd    = milestoneEnriched.filter(c => !existing.has(c.id))
-            if (!toAdd.length) return {}
-            return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
-          }, false, 'plm/findingsMilestone')
-          const channel = get()._realtimeChannel
-          if (channel) milestoneEnriched.forEach(c => channel.send({ type: 'broadcast', event: 'comment', payload: c }))
-        }
-        // Broadcast updated sample order so other participants see findings instantly
-        const ch = get()._realtimeChannel
-        if (ch && result.sampleOrder) ch.send({ type: 'broadcast', event: 'sample_order', payload: result.sampleOrder })
+        //
+        // This fetch is a second, separate network round-trip that doesn't affect whether the
+        // save itself succeeded — it used to be awaited here, which kept every caller's `await`
+        // (and therefore every tick/untick button's loading spinner) hanging for its full
+        // duration too, on top of the save. Left to resolve in the background instead, so the
+        // caller only waits on the actual save; the activity feed still updates the moment this
+        // lands, just without blocking the UI in the meantime.
+        fetchNewComments(workspaceId, ['milestone', 'field_change'], knownIds, get()._memberNameMap)
+          .then(milestoneEnriched => {
+            if (!milestoneEnriched.length) return
+            set(s => {
+              if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+              const existing = new Set(s.activeWorkspace.npd_comments.map(c => c.id))
+              const toAdd    = milestoneEnriched.filter(c => !existing.has(c.id))
+              if (!toAdd.length) return {}
+              return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
+            }, false, 'plm/findingsMilestone')
+            const channel = get()._realtimeChannel
+            if (channel) milestoneEnriched.forEach(c => channel.send({ type: 'broadcast', event: 'comment', payload: c }))
+          })
+          .catch(() => {})
       },
 
       uploadSampleImages: async (orderId, workspaceId, files) => {
         const memberId = useProfileStore.getState().orgMembership?.memberId
+        const preSave  = get().activeWorkspace
+        const knownIds = new Set(preSave?.id === workspaceId ? preSave.npd_comments.map(c => c.id) : [])
         const formData = new FormData()
         files.forEach(f => formData.append('images', f))
         formData.append('workspaceId', workspaceId)
@@ -2193,6 +2821,18 @@ export const usePlmStore = create(
         const ch = get()._realtimeChannel
         const updatedOrder = get().activeWorkspace?.sampleOrder
         if (ch && updatedOrder) ch.send({ type: 'broadcast', event: 'sample_order', payload: updatedOrder })
+
+        const enriched = await fetchNewComments(workspaceId, 'milestone', knownIds, get()._memberNameMap)
+        if (enriched.length) {
+          set(s => {
+            if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
+            const existing = new Set(s.activeWorkspace.npd_comments.map(c => c.id))
+            const toAdd = enriched.filter(c => !existing.has(c.id))
+            if (!toAdd.length) return {}
+            return { activeWorkspace: { ...s.activeWorkspace, npd_comments: [...s.activeWorkspace.npd_comments, ...toAdd] } }
+          }, false, 'plm/uploadSampleImagesMilestone')
+          if (ch) enriched.forEach(c => ch.send({ type: 'broadcast', event: 'comment', payload: c }))
+        }
         return newUrls
       },
 
@@ -2205,7 +2845,16 @@ export const usePlmStore = create(
 
         set(s => {
           if (!s.activeWorkspace || s.activeWorkspace.id !== workspaceId) return {}
-          return { activeWorkspace: { ...s.activeWorkspace, sampleOrder: result.sampleOrder } }
+          return {
+            activeWorkspace: {
+              ...s.activeWorkspace,
+              sampleOrder: result.sampleOrder,
+              ...(result.workspaceStatus ? { status: result.workspaceStatus } : {}),
+            },
+            ...(result.workspaceStatus
+              ? { skus: s.skus.map(sk => sk.workspace_id === workspaceId ? { ...sk, workspace_status: result.workspaceStatus } : sk) }
+              : {}),
+          }
         }, false, 'plm/sampleOrderUpdate')
 
         // Fetch and append any new comments the backend just inserted (milestone + field_change)
@@ -2216,6 +2865,7 @@ export const usePlmStore = create(
         // that fetch came back empty, even though the update itself succeeded).
         const sampleOrderCh = get()._realtimeChannel
         if (sampleOrderCh && result.sampleOrder) sampleOrderCh.send({ type: 'broadcast', event: 'sample_order', payload: result.sampleOrder })
+        if (sampleOrderCh && result.workspaceStatus) sampleOrderCh.send({ type: 'broadcast', event: 'workspace_status', payload: { status: result.workspaceStatus } })
 
         const enriched = await fetchNewComments(workspaceId, ['milestone', 'field_change'], knownIds, get()._memberNameMap)
 
@@ -2234,9 +2884,10 @@ export const usePlmStore = create(
         }
       },
 
+      // memberId is resolved server-side from the session now (routes/plm.js), not sent here —
+      // it used to be trusted straight from this body with no auth check on the route at all.
       createSamplePO: async (workspaceIds, poNumber, amount_usd) => {
-        const memberId = useProfileStore.getState().orgMembership?.memberId
-        const result   = await api('POST', '/purchase-orders/sample', { workspaceIds, poNumber, memberId, amount_usd })
+        const result = await api('POST', '/purchase-orders/sample', { workspaceIds, poNumber, amount_usd })
         return { po: result.po, fileUrl: result.fileUrl }
       },
 
@@ -2390,6 +3041,10 @@ export const usePlmStore = create(
         })
         const activeSku = get().activeSku
         await get().openWorkspace(workspaceId, activeSku, { silent: true })
+
+        set(s => ({
+          skus: s.skus.map(sk => sk.workspace_id === workspaceId ? { ...sk, workspace_status: 'approved' } : sk),
+        }), false, 'plm/workspaceApproved')
 
         // Broadcast so other participants (merchant/supplier) update without reload
         const channel = get()._realtimeChannel
@@ -2604,9 +3259,21 @@ export const usePlmStore = create(
       },
 
       // ── Upload ────────────────────────────────────────────────────────────────
-      uploadCatalog: async (formData) => {
-        const result = await api('POST', '/supplier-catalog/upload', null, formData)
+      // signal lets the caller abort the in-flight upload request itself (not just stop
+      // waiting on it) — see CatalogUploadModal's handleCancel, which uses this to close the
+      // narrow window where hitting Cancel during the initial file-upload phase (before an
+      // uploadId even exists to cancel server-side) could otherwise still let the upload
+      // quietly succeed a moment later.
+      uploadCatalog: async (formData, signal) => {
+        const result = await api('POST', '/supplier-catalog/upload', null, formData, signal)
         return result
+      },
+
+      // Kills the still-running worker execution outright and removes whatever SKUs it had
+      // already created for this upload — see routes/plm.js's POST /catalog/upload/:id/cancel
+      // for why there's no graceful "please stop" (the worker's own code isn't in this repo).
+      cancelUpload: async (uploadId) => {
+        return api('POST', `/catalog/upload/${uploadId}/cancel`, {})
       },
 
       uploadBuyerSpec: async (formData) => {

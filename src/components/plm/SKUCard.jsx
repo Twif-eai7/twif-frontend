@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { usePlmStore } from '../../stores/plmStore'
 import SKUStatusBadge from './SKUStatusBadge'
+import { isSkuSelectable } from './skuSelection'
 
 const parseBrief = (raw) => {
   if (!raw) return {}
@@ -10,15 +11,18 @@ const parseBrief = (raw) => {
 
 const CURRENCY_SYMBOLS = { USD: '$', GBP: '£', EUR: '€' }
 
-export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, isDuplicateLink }) {
-  const selectedIds   = usePlmStore(s => s.selectedIds)
+function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, isDuplicateLink, priority = false }) {
+  // Subscribing to just this card's own membership (not the whole Set) means toggling ONE
+  // SKU's selection only re-renders that card — previously every mounted card subscribed to
+  // the entire selectedIds Set, and since toggleSelect always creates a new Set, clicking a
+  // single checkbox re-rendered every card on the page (thousands at admin scale).
+  const isSelected     = usePlmStore(s => s.selectedIds.has(sku.id))
   const toggleSelect  = usePlmStore(s => s.toggleSelect)
   const openWorkspace = usePlmStore(s => s.openWorkspace)
   const toast         = usePlmStore(s => s.toast)
 
   const [showCatalog, setShowCatalog] = useState(false)
 
-  const isSelected   = selectedIds.has(sku.id)
   const hasWorkspace = !!sku.workspace_id
   const brief        = parseBrief(sku.buyer_brief)
 
@@ -64,9 +68,18 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
   // the moment it first flips to "approved" — a workspace that's since moved on to sample or
   // production still has that same frozen price, it just shouldn't disappear from the card.
   const approvedCurrency = sku.approved_currency || brief.currency || 'USD'
-  const approvedPriceLabel = ['Price', ['approved', 'sample', 'production'].includes(sku.workspace_status) && sku.approved_price != null
+  const approvedPriceValue = ['approved', 'sample', 'sample_shipped', 'production'].includes(sku.workspace_status) && sku.approved_price != null
     ? `${CURRENCY_SYMBOLS[approvedCurrency] || approvedCurrency}${sku.approved_price}`
-    : null]
+    : null
+
+  // "Price" always = the SKU's own original price; "Approved Price" (buyer-confirmed)
+  // only shows once it exists. Same in both the brief and catalog views.
+  const priceRows = [
+    ['Price', sku.original_price != null && sku.original_price !== ''
+      ? `${CURRENCY_SYMBOLS[sku.original_currency] || sku.original_currency || '$'}${sku.original_price}`
+      : null],
+    ...(approvedPriceValue ? [['Approved Price', approvedPriceValue]] : []),
+  ]
 
   const attrs = useBrief
     ? [
@@ -76,7 +89,7 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
         ['Dimensions',  brief.dimensions],
         ['Finish',      brief.finish],
         ['Weight',      brief.weight ? `${brief.weight} kg` : null],
-        approvedPriceLabel,
+        ...priceRows,
       ]
     : [
         ['Description', sku.description],
@@ -84,12 +97,12 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
         ['Dimensions',  catalogDims],
         ['Finish',      sku.finish],
         ['Weight',      sku.weight ? `${sku.weight} kg` : null],
-        approvedPriceLabel,
+        ...priceRows,
       ]
 
   return (
     <div
-      className={`bg-white cursor-pointer relative flex flex-col transition-opacity active:opacity-60 group
+      className={`bg-white cursor-pointer relative flex flex-col transition-opacity active:opacity-60 group select-none [-webkit-touch-callout:none]
         ${isSelected ? 'ring-2 ring-[#1A1A18]' : ''}
       `}
       onClick={handleClick}
@@ -98,7 +111,7 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
           Kept selectable even for production-linked/non-'new' SKUs since selection also
           drives Edit Attributes / Delete / Create Sample PO — only "Create Workspaces"
           specifically excludes them (see handleCreateWorkspaces in PLMPage). */}
-      {((role === 'merchant' && !sku.is_read_only) || (role === 'buyer' && !!sku.workspace_id)) && (
+      {isSkuSelectable(sku, role) && (
         <button
           type="button"
           title={isSelected ? 'Deselect' : 'Select'}
@@ -107,7 +120,7 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
             border-[1.5px] shadow-sm
             ${isSelected
               ? 'bg-[#1A1A18] border-transparent'
-              : 'bg-[rgba(245,243,239,.9)] border-black/30 opacity-0 group-hover:opacity-100'
+              : 'bg-[rgba(245,243,239,.9)] border-black/30 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100'
             }`}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -122,7 +135,7 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
           type="button"
           title="Edit attributes"
           onClick={e => { e.stopPropagation(); onEdit(sku) }}
-          className="absolute top-2 right-2 z-10 w-9 h-9 rounded-full border border-black/20 bg-[rgba(245,243,239,.92)] flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-[#1A1A18] hover:[&>svg]:stroke-[#F5F3EF]"
+          className="absolute top-2 right-2 z-10 w-9 h-9 rounded-full border border-black/20 bg-[rgba(245,243,239,.92)] flex items-center justify-center cursor-pointer opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity shadow-sm hover:bg-[#1A1A18] hover:[&>svg]:stroke-[#F5F3EF]"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1A1A18" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -147,7 +160,7 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
             type="button"
             title={sku.image_url ? 'Edit image' : 'Add image'}
             onClick={e => { e.stopPropagation(); onEditImage?.(sku) }}
-            className="absolute top-2 right-12 z-10 w-9 h-9 rounded-full border border-black/20 bg-[rgba(245,243,239,.92)] flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-[#1A1A18] hover:[&>svg]:stroke-[#F5F3EF]"
+            className="absolute top-2 right-12 z-10 w-9 h-9 rounded-full border border-black/20 bg-[rgba(245,243,239,.92)] flex items-center justify-center cursor-pointer opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity shadow-sm hover:bg-[#1A1A18] hover:[&>svg]:stroke-[#F5F3EF]"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1A1A18" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -159,7 +172,17 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
 
         {displayImg ? (
           <>
-            <img src={displayImg} alt={sku.description || sku.auto_code} loading="lazy" className="absolute inset-0 w-full h-full object-contain"/>
+            <img
+              src={displayImg}
+              alt={sku.description || sku.auto_code}
+              // The first few above-the-fold cards must NOT be lazy — "loading=lazy" tells
+              // the browser to deprioritize/defer exactly the image most likely to be the
+              // LCP candidate. Only cards below the fold (the vast majority, at admin scale)
+              // stay lazy.
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : undefined}
+              className="absolute inset-0 w-full h-full object-contain"
+            />
 
             {/* Chevron toggle — replaces edit icons when workspace active and brief data exists */}
             {hasWorkspace && (brief.description || brief.material || brief.color || brief.image_url) && (
@@ -167,7 +190,7 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
                 type="button"
                 onClick={e => { e.stopPropagation(); setShowCatalog(v => !v) }}
                 title={showCatalog ? 'Show buyer brief' : 'Show original catalog'}
-                className="absolute top-2 right-[5.5rem] z-10 w-9 h-9 rounded-full border border-black/20 bg-[rgba(245,243,239,.92)] flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-[#1A1A18] hover:[&>svg]:stroke-[#F5F3EF]"
+                className="absolute top-2 right-[5.5rem] z-10 w-9 h-9 rounded-full border border-black/20 bg-[rgba(245,243,239,.92)] flex items-center justify-center cursor-pointer opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity shadow-sm hover:bg-[#1A1A18] hover:[&>svg]:stroke-[#F5F3EF]"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1A1A18" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   {showCatalog
@@ -190,9 +213,9 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
       </div>
 
       {/* Body */}
-      <div className="px-3 pb-3 pt-2.5 flex flex-col gap-1.5 border-t border-black">
+      <div className="px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-2 sm:pt-2.5 flex flex-col gap-1 sm:gap-1.5 border-t border-black">
         {/* Code */}
-        <div className="text-[14px] font-extrabold uppercase tracking-[.02em] text-[#1A1A18] font-mono">
+        <div className="text-[12px] sm:text-[14px] font-extrabold uppercase tracking-[.02em] text-[#1A1A18] font-mono">
           {sku.auto_code}
           {sku.buyer_sku_ref && <span className="text-black/40"> · {sku.buyer_sku_ref}</span>}
           {sku.buyer_ref && <span className="text-black/40"> · {sku.buyer_ref}</span>}
@@ -225,20 +248,18 @@ export default function SKUCard({ sku, role, onEdit, onCardClick, onEditImage, i
           ))}
         </div>
 
-        {/* Label when toggled to catalog view */}
-        {hasWorkspace && showCatalog && (
-          <div className="text-[9px] text-black/25 font-semibold uppercase tracking-[.05em]">Original catalog</div>
-        )}
       </div>
     </div>
   )
 }
 
+export default memo(SKUCard)
+
 function AttrRow({ label, val }) {
   return (
-    <div className="grid gap-10 text-[10px] leading-relaxed" style={{ gridTemplateColumns: '72px 1fr' }}>
-      <span className="text-[9px] font-medium uppercase tracking-[.06em] text-black/75">{label}</span>
-      <span className={`text-[9px] font-bold uppercase tracking-[.03em] break-words ${val ? 'text-[#1A1A18]' : 'text-black/25'}`}>{val || 'empty'}</span>
+    <div className="grid grid-cols-[64px_1fr] sm:grid-cols-[72px_1fr] gap-1.5 sm:gap-4 text-[10px] leading-relaxed items-start">
+      <span className="text-[8px] sm:text-[9px] font-medium uppercase tracking-[.02em] sm:tracking-[.06em] text-black/75 break-words" title={label}>{label}</span>
+      <span className={`text-[8px] sm:text-[9px] font-bold uppercase tracking-[.03em] break-words ${val ? 'text-[#1A1A18]' : 'text-black/25'}`}>{val || 'empty'}</span>
     </div>
   )
 }

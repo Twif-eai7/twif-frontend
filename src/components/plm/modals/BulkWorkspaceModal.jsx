@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { usePlmStore } from '../../../stores/plmStore'
-import { useMemberId } from '../../../stores/profileStore'
+import { useMemberId, useOrgId } from '../../../stores/profileStore'
 import { useBuyerOrgs, useSupplierOrgs } from '../../../stores/orgsStore'
 
 // copyText requires document focus, which is lost after async awaits.
@@ -28,6 +28,7 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
   const refreshCatalog          = usePlmStore(s => s.refreshCatalog)
   const toast      = usePlmStore(s => s.toast)
   const memberId   = useMemberId()
+  const myOrgId    = useOrgId()
   const buyerOrgs  = useBuyerOrgs()
   const supplierOrgs = useSupplierOrgs()
 
@@ -55,14 +56,17 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
   const uniqueExistingBuyerEmails = [...new Set(skusExisting.map(s => s.buyer_email).filter(Boolean))]
   const existingBuyerEmail = uniqueExistingBuyerEmails.length === 1 ? uniqueExistingBuyerEmails[0] : null
 
-  const MAX_INVITES = 4
+  // No cap on how many buyer/vendor contacts can be invited.
+  const MAX_INVITES = Infinity
 
   // Members are fetched per org — invites can only be sent to people already
   // registered as a member of that buyer/vendor organization (no free-text email entry).
   const [buyerMembers,    setBuyerMembers]    = useState([])
   const [supplierMembers, setSupplierMembers] = useState([])
+  const [qaMembers,       setQaMembers]       = useState([])
   const [loadingBuyers,   setLoadingBuyers]   = useState(false)
   const [loadingSuppliers, setLoadingSuppliers] = useState(false)
+  const [loadingQa,       setLoadingQa]       = useState(false)
 
   useEffect(() => {
     if (!lockedBuyerOrgId) return
@@ -76,6 +80,14 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
     fetchOrgMembers(lockedSupplierOrgId).then(setSupplierMembers).finally(() => setLoadingSuppliers(false))
   }, [lockedSupplierOrgId, fetchOrgMembers])
 
+  // QA is always the merchant's OWN org (never buyer/vendor org), department-filtered —
+  // available regardless of buyer/vendor activation state, so fetched unconditionally.
+  useEffect(() => {
+    if (!myOrgId) return
+    setLoadingQa(true)
+    fetchOrgMembers(myOrgId, 'qa').then(setQaMembers).finally(() => setLoadingQa(false))
+  }, [myOrgId, fetchOrgMembers])
+
   const findMemberEmail = (members, email) =>
     members.find(m => (m.email || '').toLowerCase() === (email || '').toLowerCase())?.email || ''
 
@@ -83,6 +95,10 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
   const [buyerErrors,      setBuyerErrors]      = useState([false])
   const [addSupplier,      setAddSupplier]      = useState(buyerAlreadyActive)
   const [supplierSelected, setSupplierSelected] = useState([''])
+  // QA doesn't wait on buyer/vendor activation the way the vendor picker does — always offered
+  // as its own opt-in toggle, independent of buyerAlreadyActive.
+  const [addQa,            setAddQa]            = useState(false)
+  const [qaSelected,       setQaSelected]       = useState([''])
   const [saving,         setSaving]         = useState(false)
   const [copyingLink,    setCopyingLink]    = useState(false)
   const [done,           setDone]           = useState(false)
@@ -95,6 +111,7 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
 
   const buyerFilled = buyerSelected[0].trim().length > 0
   const supplierFilledAny = supplierSelected.some(v => v.trim().length > 0)
+  const qaFilledAny = addQa && qaSelected.some(v => v.trim().length > 0)
 
   // ── buyer row helpers ──
   const setBuyerSelected = (idx, val) => {
@@ -109,6 +126,11 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
   const addSupplierRow    = () => { if (supplierSelected.length < MAX_INVITES) setSupplierSelected(p => [...p, '']) }
   const removeSupplierRow = (idx) => setSupplierSelected(p => p.filter((_, i) => i !== idx))
 
+  // ── QA row helpers ──
+  const setQaSelectedAt = (idx, val) => setQaSelected(prev => prev.map((v, i) => i === idx ? val : v))
+  const addQaRow    = () => { if (qaSelected.length < MAX_INVITES) setQaSelected(p => [...p, '']) }
+  const removeQaRow = (idx) => setQaSelected(p => p.filter((_, i) => i !== idx))
+
   // ── Shared: validate inputs + run invite API calls ──
   // Returns { allWsIds, validBuyerEmails, validSupplierEmails } on success, null on validation failure.
   // skipEmail: true → create invite records but suppress the email notification (used by copy-link flow)
@@ -120,7 +142,7 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
       setError('Select a registered buyer')
       return null
     }
-    if (buyerAlreadyActive && !buyerFilled && !(addSupplier && supplierFilledAny)) {
+    if (buyerAlreadyActive && !buyerFilled && !(addSupplier && supplierFilledAny) && !qaFilledAny) {
       setError('Select at least one person to invite')
       return null
     }
@@ -129,6 +151,7 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
 
     const validBuyerEmails    = buyerSelected.filter(Boolean)
     const validSupplierEmails = addSupplier ? supplierSelected.filter(Boolean) : []
+    const validQaEmails       = addQa ? qaSelected.filter(Boolean) : []
 
     let newWorkspaceIds = []
     const existingWsIds = skusExisting.map(s => s.workspace_id)
@@ -170,9 +193,16 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
           bulkInvites.push(addWorkspaceInvitesBulk(existingWsIds, email, 'supplier', lockedSupplierOrgId || undefined))
     }
 
+    // QA is independent of the new-vs-existing / buyer-vs-vendor branching above — it never
+    // participates in workspace creation, always targets whichever workspaces already exist
+    // by the time we get here (allWsIds includes the ones createWorkspacesBulk just made).
+    for (const email of validQaEmails)
+      if (allWsIds.length)
+        bulkInvites.push(addWorkspaceInvitesBulk(allWsIds, email, 'qa', undefined, skipEmail || undefined))
+
     await Promise.all(bulkInvites)
 
-    return { allWsIds, validBuyerEmails, validSupplierEmails }
+    return { allWsIds, validBuyerEmails, validSupplierEmails, validQaEmails }
   }
 
   // ── Send invites via email (existing flow) ──
@@ -202,7 +232,7 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
       const result = await executeInvites({ skipEmail: true })
       if (!result) return
 
-      const { allWsIds, validBuyerEmails, validSupplierEmails } = result
+      const { allWsIds, validBuyerEmails, validSupplierEmails, validQaEmails } = result
       const origin = window.location.origin
 
       const buyerLinks = []
@@ -217,14 +247,20 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
         if (token) supplierLinks.push({ email, url: `${origin}/plm/accept?token=${token}` })
       }
 
-      if (!buyerLinks.length && !supplierLinks.length) {
+      const qaLinks = []
+      for (const email of validQaEmails) {
+        const token = await getWorkspaceInviteToken(allWsIds, email, 'qa')
+        if (token) qaLinks.push({ email, url: `${origin}/plm/accept?token=${token}` })
+      }
+
+      if (!buyerLinks.length && !supplierLinks.length && !qaLinks.length) {
         setError('Could not retrieve invite link — try sending via email instead')
         return
       }
 
-      const allUrls = [...buyerLinks, ...supplierLinks].map(l => l.url).join('\n')
+      const allUrls = [...buyerLinks, ...supplierLinks, ...qaLinks].map(l => l.url).join('\n')
       await copyText(allUrls)
-      setCopiedLinks({ buyers: buyerLinks, suppliers: supplierLinks })
+      setCopiedLinks({ buyers: buyerLinks, suppliers: supplierLinks, qa: qaLinks })
       toast?.('Invite link copied to clipboard!')
       await refreshCatalog()
     } catch (err) {
@@ -441,6 +477,75 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
               )}
             </div>
 
+            {/* ── QA picker — internal merchant-org colleagues only (department 'qa'),
+                Group Chat + read-only access. Always available regardless of buyer/vendor
+                activation state, unlike the vendor picker above. ── */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setAddQa(v => !v)}
+                  className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.06em] text-black/40 hover:text-black/70 transition-colors cursor-pointer border-none bg-none w-fit"
+                >
+                  <span className={`w-3.5 h-3.5 border flex items-center justify-center flex-shrink-0 ${addQa ? 'bg-[#1A1A18] border-transparent' : 'border-black/30'}`}>
+                    {addQa && (
+                      <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+                        <polyline points="1.5 5 4 7.5 8.5 2.5" stroke="#F5F3EF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </span>
+                  Also invite QA
+                </button>
+                {addQa && qaSelected.length < MAX_INVITES && qaMembers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={addQaRow}
+                    className="text-[10px] font-bold text-black/40 hover:text-black/70 cursor-pointer border-none bg-none"
+                  >+ Add</button>
+                )}
+              </div>
+
+              {addQa && (
+                <div className="flex flex-col gap-1 pl-5">
+                  {!myOrgId ? (
+                    <span className="text-[10px] text-black/40 bg-black/[.03] px-3 py-2 border-l-2 border-black/15">
+                      No organisation resolved.
+                    </span>
+                  ) : loadingQa ? (
+                    <span className="text-[10px] text-black/40">Loading registered QA members…</span>
+                  ) : qaMembers.length === 0 ? (
+                    <span className="text-[10px] text-red-500 bg-red-50 px-3 py-2 border-l-2 border-red-300">
+                      No QA-department members found in your organisation.
+                    </span>
+                  ) : (
+                    qaSelected.map((val, idx) => (
+                      <div key={idx} className="flex items-center gap-1 border-b border-black/20 bg-[#e9e9e93d]">
+                        <select
+                          className="px-2 py-1.5 text-[12px] bg-transparent outline-none flex-1"
+                          value={val}
+                          onChange={e => { setQaSelectedAt(idx, e.target.value); setError(null) }}
+                        >
+                          <option value="">Select QA…</option>
+                          {qaMembers
+                            .filter(m => m.email === val || !qaSelected.includes(m.email))
+                            .map(m => (
+                              <option key={m.id} value={m.email}>{memberLabel(m)}</option>
+                            ))}
+                        </select>
+                        {qaSelected.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeQaRow(idx)}
+                            className="px-2 text-black/30 hover:text-black/60 cursor-pointer border-none bg-none text-[14px] leading-none"
+                          >×</button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -465,6 +570,18 @@ export default function BulkWorkspaceModal({ skus, onClose, onDone }) {
               {copiedLinks.suppliers.map(({ email, url }) => (
                 <div key={email} className="flex flex-col gap-0.5">
                   <span className="text-[9px] font-bold uppercase tracking-[.04em] text-black/40">Vendor — {email}</span>
+                  <div
+                    className="text-[9px] text-black/50 font-mono bg-black/[.04] px-2 py-1 rounded break-all cursor-pointer hover:bg-black/[.07] transition-colors"
+                    onClick={() => copyText(url)}
+                    title="Click to copy"
+                  >
+                    {url}
+                  </div>
+                </div>
+              ))}
+              {copiedLinks.qa?.map(({ email, url }) => (
+                <div key={email} className="flex flex-col gap-0.5">
+                  <span className="text-[9px] font-bold uppercase tracking-[.04em] text-black/40">QA — {email}</span>
                   <div
                     className="text-[9px] text-black/50 font-mono bg-black/[.04] px-2 py-1 rounded break-all cursor-pointer hover:bg-black/[.07] transition-colors"
                     onClick={() => copyText(url)}

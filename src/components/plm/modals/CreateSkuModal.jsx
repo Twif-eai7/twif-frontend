@@ -57,6 +57,8 @@ export default function CreateSkuModal({ onClose }) {
     w:               '',
     h:               '',
     measurement: 'cm',
+    originalPrice:    '',
+    originalCurrency: 'USD',
   })
 
   const set = (k, v) => setFields(f => ({ ...f, [k]: v }))
@@ -351,6 +353,30 @@ export default function CreateSkuModal({ onClose }) {
               </div>
             </div>
 
+            {/* Original Price + currency — optional */}
+            <div className="flex gap-2 items-end">
+              <div className="flex flex-col gap-0.5 w-1/4">
+                <span className="text-[9px] font-bold uppercase tracking-[.07em] text-black/55">Original Price</span>
+                <input
+                  type="number" step="0.01" min="0"
+                  className="px-2 py-1.5 border-b border-black/20 text-[12px] bg-[#e9e9e93d] outline-none focus:border-black/60 w-full"
+                  value={fields.originalPrice}
+                  onChange={e => set('originalPrice', e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[9px] font-bold uppercase tracking-[.07em] text-black/55">Currency</span>
+                <select
+                  className="px-2 py-1.5 border-b border-black/20 text-[12px] bg-[#e9e9e93d] outline-none focus:border-black/60"
+                  value={fields.originalCurrency}
+                  onChange={e => set('originalCurrency', e.target.value)}
+                >
+                  {['USD', 'GBP', 'EUR'].map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -375,6 +401,7 @@ export default function CreateSkuModal({ onClose }) {
           imageUrl={editingUrl}
           onSave={handleEditorSave}
           onClose={() => { URL.revokeObjectURL(editingUrl); setEditingUrl(null) }}
+          toast={(message) => alert(message)}
         />
       )}
     </div>

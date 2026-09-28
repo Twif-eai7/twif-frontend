@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import  LogoMark  from '../ui/LogoMark'
 import { useAuth } from '../../hooks/useAuth'
+import { canAccessMembersPage } from '../../utils/membersPageAccess'
 
 const NAV = [
   {
@@ -54,11 +55,26 @@ const NAV = [
       </svg>
     ),
   },
+  {
+    to: '/admin/plm-security',
+    label: 'Accessibility and Roles',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 1.5 3 3.5v3.75c0 3.25 2.1 5.85 5 6.75 2.9-.9 5-3.5 5-6.75V3.5L8 1.5Z" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+        <path d="m5.75 8 1.5 1.5 3-3.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
 ]
 
 export function AdminShell({ children }) {
   const { signOut, user } = useAuth()
   const navigate = useNavigate()
+
+  // Manage Members is limited to a fixed email allowlist; drop the link for anyone else.
+  const nav = NAV.filter(item =>
+    item.to !== '/admin/members' || canAccessMembersPage(user?.email)
+  )
 
   async function handleSignOut() {
     await signOut()
@@ -89,7 +105,7 @@ export function AdminShell({ children }) {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {NAV.map(item => (
+          {nav.map(item => (
             <NavLink
               key={item.to}
               to={item.to}

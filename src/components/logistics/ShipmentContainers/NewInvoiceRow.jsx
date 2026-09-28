@@ -79,18 +79,22 @@ function FilePick({ file, onFile, readOnly, existingUrl }) {
   )
 }
 
-// CBM and PO composition are the merchant's own group — fixed by the time
-// logistics ever sees it (confirmed_at gates visibility). Shown as plain
-// text/chips, deliberately NOT styled like the ci-boxed fields below, so
-// it reads at a glance as fact rather than something editable. Vendor
-// lives in the card's own heading instead of repeating it here.
-function PlanningDetails({ group }) {
+// PO composition is the merchant's own group — fixed by the time logistics
+// ever sees it (confirmed_at gates visibility) — shown as plain chips.
+// CBM, though prefilled from that same planned figure, is editable here:
+// the merchant's derived number is a starting point, not necessarily the
+// real loaded CBM once the container is packed. Vendor lives in the card's
+// own heading instead of repeating it here.
+function PlanningDetails({ invoice, set, group, readOnly }) {
   if (!group) return null
   return (
     <div className="flex items-start gap-4 pb-2 border-b border-gray-100">
-      <div className="flex-shrink-0">
-        <div className={cl}>CBM</div>
-        <div className="text-sm font-bold text-gray-900">{group.cbm ?? '—'}</div>
+      <div className="flex-shrink-0 w-24">
+        <CF label="CBM">
+          <input type="number" min="0" step="0.001" value={invoice.cbm} disabled={readOnly}
+            onChange={e => set({ cbm: e.target.value })} placeholder="0.000"
+            className={`${ci} ${readOnly ? 'opacity-60 cursor-not-allowed' : ''}`} />
+        </CF>
       </div>
       {group.pos?.length > 0 && (
         <div className="flex-1 min-w-0">
@@ -114,17 +118,16 @@ function PlanningDetails({ group }) {
 function BodyFields({ invoice, set, file, onFile, invoiceFileUrl, packingListFile, onPackingListFile, packingListFileUrl, rates, group, readOnly }) {
   const base  = parseFloat(invoice.invoice_value || 0)
   const add   = parseFloat(invoice.additional_charges || 0)
-  const disc  = parseFloat(invoice.discount || 0)
-  const total = base + add - disc
+  const total = base + add
   const usd   = invoice.currency && invoice.currency !== 'USD' && total > 0 && rates
                 ? convertToUSD(total, invoice.currency, rates) : null
   const disabledCls = readOnly ? 'opacity-60 cursor-not-allowed' : ''
 
   return (
     <div className="space-y-2">
-      <PlanningDetails group={group} />
+      <PlanningDetails invoice={invoice} set={set} group={group} readOnly={readOnly} />
       {/* Financial row */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: '2fr 3rem 1fr 1fr 2fr' }}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: '2fr 3rem 1fr 2fr' }}>
         <CF label="Value">
           <input type="number" min="0" step="0.01" value={invoice.invoice_value} disabled={readOnly}
             onChange={e => set({ invoice_value: e.target.value })} placeholder="0.00" className={`${ci} ${disabledCls}`} />
@@ -144,10 +147,6 @@ function BodyFields({ invoice, set, file, onFile, invoiceFileUrl, packingListFil
         <CF label="Add. Charges">
           <input type="number" min="0" step="0.01" value={invoice.additional_charges} disabled={readOnly}
             onChange={e => set({ additional_charges: e.target.value })} placeholder="0.00" className={`${ci} ${disabledCls}`} />
-        </CF>
-        <CF label="Discount">
-          <input type="number" min="0" step="0.01" value={invoice.discount} disabled={readOnly}
-            onChange={e => set({ discount: e.target.value })} placeholder="0.00" className={`${ci} ${disabledCls}`} />
         </CF>
         <CF label="Total Value">
           <div className={`${ci} flex items-baseline gap-1.5 cursor-default`}>

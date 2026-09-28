@@ -1,5 +1,13 @@
 import { usePlmStore } from '../../stores/plmStore'
+import { useRole } from '../../stores/profileStore'
 import CategoryNav from './CategoryNav'
+
+const BuyerSummaryIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 14 L2 9 M6 14 L6 6 M10 14 L10 3 M14 14 L14 7.5"/>
+    <path d="M1.5 14.5 L14.5 14.5"/>
+  </svg>
+)
 
 const ToggleIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -8,20 +16,46 @@ const ToggleIcon = () => (
 )
 
 export default function PLMSidebar({ skus }) {
-  const collapsed     = usePlmStore(s => s.sidebarCollapsed)
-  const toggleSidebar = usePlmStore(s => s.toggleSidebar)
+  const collapsed         = usePlmStore(s => s.sidebarCollapsed)
+  const toggleSidebar     = usePlmStore(s => s.toggleSidebar)
+  const buyerSummaryMode       = usePlmStore(s => s.buyerSummaryMode)
+  const toggleBuyerSummaryMode = usePlmStore(s => s.toggleBuyerSummaryMode)
+  const role              = useRole()
+
+  // Buyer Summary (text button) is the buyer-facing pipeline-stage report — merchants use it via
+  // the buyer filter (see PLMPage.jsx), and buyers see their own org's summary directly.
+  const showBuyerSummaryButton = role === 'Merchant' || role === 'Buyer'
 
   return (
     <>
-      {/* ── Desktop sidebar ── */}
+      {/* ── Desktop sidebar ──
+          h-full (not h-screen) so this stretches to match its actual flex parent's height —
+          that parent is already shorter than 100vh (PLMTopBar eats some of the viewport) and
+          clips anything taller via overflow-hidden. h-screen previously made this element taller
+          than the space it's given, so its own overflow-y-auto scroll range was computed against
+          a box bigger than what's visible, capping how far you could actually scroll before
+          reaching rows near the bottom (e.g. Jewellery/Textiles after expanding a long category
+          tree above them). No sticky/self-start needed once this just fills its row normally. */}
       <aside
-        className={`hidden md:flex flex-col flex-shrink-0 bg-[#f5f3ef] border-r border-black/[.12] sticky top-0 h-screen overflow-y-auto overflow-x-hidden self-start transition-[width] duration-200
-          ${collapsed ? 'w-11' : 'w-[238px]'}
+        className={`plm-sidebar-scroll hidden md:flex flex-col flex-shrink-0 bg-[#f5f3ef] border-r border-black/[.12] h-full overflow-y-auto overflow-x-hidden transition-[width] duration-200
+          ${collapsed ? 'w-11' : 'w-[258px]'}
         `}
       >
         <div className={`flex items-center border-b border-black/[.12] mb-2 sticky top-0 z-[2] bg-[#f5f3ef] pb-3.5 pt-2.5
-          ${collapsed ? 'justify-center px-2' : 'justify-end px-3 pl-3.5'}
+          ${collapsed ? 'justify-center px-2' : 'justify-between px-3 pl-3.5'}
         `}>
+          {showBuyerSummaryButton && !collapsed && (
+            <button
+              type="button"
+              title="Buyer Summary"
+              onClick={toggleBuyerSummaryMode}
+              className={`border-none bg-none cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.06em] flex-shrink-0 transition-opacity
+                ${buyerSummaryMode ? 'text-[#1A1A18] opacity-100' : 'text-[#1A1A18] opacity-55 hover:opacity-100'}`}
+            >
+              <BuyerSummaryIcon />
+              Summary
+            </button>
+          )}
           <button
             type="button"
             title="Collapse / expand"
@@ -42,8 +76,22 @@ export default function PLMSidebar({ skus }) {
             className="md:hidden fixed inset-0 bg-black/30 z-[198]"
             onClick={toggleSidebar}
           />
-          <div className="md:hidden fixed top-0 left-0 h-screen w-[238px] bg-[#f5f3ef] border-r border-black/[.12] z-[199] overflow-y-auto flex flex-col">
-            <div className="flex items-center justify-end px-3 pl-3.5 border-b border-black/[.12] mb-2 sticky top-0 z-[2] bg-[#f5f3ef] pb-3.5 pt-2.5">
+          <div className="plm-sidebar-scroll md:hidden fixed top-0 left-0 h-screen w-[258px] bg-[#f5f3ef] border-r border-black/[.12] z-[199] overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between gap-2 px-3 pl-3.5 border-b border-black/[.12] mb-2 sticky top-0 z-[2] bg-[#f5f3ef] pb-3.5 pt-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {showBuyerSummaryButton && (
+                  <button
+                    type="button"
+                    title="Buyer Summary"
+                    onClick={toggleBuyerSummaryMode}
+                    className={`border-none bg-none cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.06em] flex-shrink-0 transition-opacity
+                      ${buyerSummaryMode ? 'text-[#1A1A18] opacity-100' : 'text-[#1A1A18] opacity-55 hover:opacity-100'}`}
+                  >
+                    <BuyerSummaryIcon />
+                    Summary
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 title="Close categories"

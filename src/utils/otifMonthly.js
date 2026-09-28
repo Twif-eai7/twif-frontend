@@ -34,7 +34,7 @@ export function otifMonthKeysForFy(fy) {
   return fy === '26' ? FY26_OTIF_MONTH_KEYS : FY27_OTIF_MONTH_KEYS
 }
 
-function monthKeyToLabel(key) {
+export function monthKeyToLabel(key) {
   const [yr, m] = key.split('-')
   return `${MONTHS[parseInt(m, 10) - 1] || m} ${yr}`
 }
@@ -83,6 +83,8 @@ export function computeOtifMonthly(rows, monthKeys = FY27_OTIF_MONTH_KEYS) {
       shippedValue: shippedPos ? shippedValue : null,
       balanceValue: shippedPos ? balanceValue : null,
       percentage: shippedPos ? (onTimePos / shippedPos) * 100 : null,
+      shippedPos,
+      onTimePos,
     }
   })
 

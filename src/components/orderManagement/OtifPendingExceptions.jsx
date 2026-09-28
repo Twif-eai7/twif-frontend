@@ -16,6 +16,7 @@ function ReviewModal({ exception: ex, onClose, onDone }) {
 
   if (!ex) return null
 
+  const isCancellation = ex.exception_type === 'quantity_cancellation'
   const { orgMembership } = useProfileStore.getState()
   const reviewerName = orgMembership?.fullName || orgMembership?.memberId || 'Unknown'
 
@@ -32,12 +33,23 @@ function ReviewModal({ exception: ex, onClose, onDone }) {
           .eq('id', ex.id)
         if (e1) throw e1
 
-        // Set exceptional_ex_factory_date — original ex_factory_date is preserved
-        const { error: e2 } = await supabase
-          .from('purchase_orders')
-          .update({ exceptional_ex_factory_date: ex.proposed_ex_factory_date })
-          .eq('id', ex.po_id)
-        if (e2) throw e2
+        if (ex.exception_type === 'quantity_cancellation') {
+          // Atomic increment/decrement (col = col +/- amount) - a plain
+          // .update() can't express that, so this goes through the RPC added
+          // alongside these columns (see the migration that extended this
+          // table for cancellations).
+          const { error: e2 } = await supabase.rpc('apply_line_item_cancellation', {
+            p_line_item_id: ex.line_item_id, p_amount: ex.requested_quantity,
+          })
+          if (e2) throw e2
+        } else {
+          // Set exceptional_ex_factory_date — original ex_factory_date is preserved
+          const { error: e2 } = await supabase
+            .from('purchase_orders')
+            .update({ exceptional_ex_factory_date: ex.proposed_ex_factory_date })
+            .eq('id', ex.po_id)
+          if (e2) throw e2
+        }
       } else {
         if (!note.trim()) { setError('Please provide a reason for rejection.'); setLoading(false); return }
         const { error: e1 } = await supabase
@@ -63,9 +75,10 @@ function ReviewModal({ exception: ex, onClose, onDone }) {
 
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
-            <div className="text-sm font-bold text-gray-900">Review Exception</div>
+            <div className="text-sm font-bold text-gray-900">{isCancellation ? 'Review Cancellation Request' : 'Review Exception'}</div>
             <div className="text-xs text-gray-500 mt-0.5">
               PO#{ex.purchase_orders?.po_number} · {ex.purchase_orders?.buyer_supplier_links?.buyer?.display_name}
+              {isCancellation && ex.po_line_items?.buyer_sku_ref && ` · SKU ${ex.po_line_items.buyer_sku_ref}`}
             </div>
           </div>
           <button type="button" onClick={loading ? undefined : onClose}
@@ -77,19 +90,35 @@ function ReviewModal({ exception: ex, onClose, onDone }) {
         </div>
 
         <div className="px-5 py-4 flex flex-col gap-3">
-          <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
-            <div className="flex-1 text-center">
-              <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Current</div>
-              <div className="text-xs font-semibold text-gray-700">{ex.purchase_orders?.ex_factory_date || '—'}</div>
+          {isCancellation ? (
+            <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex-1 text-center">
+                <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Order Qty</div>
+                <div className="text-xs font-semibold text-gray-700">{ex.po_line_items?.quantity_ordered ?? '-'}</div>
+              </div>
+              <svg className="w-4 h-4 text-amber-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              <div className="flex-1 text-center">
+                <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Requested Cancel</div>
+                <div className="text-xs font-semibold text-amber-700">{ex.requested_quantity}</div>
+              </div>
             </div>
-            <svg className="w-4 h-4 text-amber-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-            <div className="flex-1 text-center">
-              <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Proposed</div>
-              <div className="text-xs font-semibold text-amber-700">{ex.proposed_ex_factory_date}</div>
+          ) : (
+            <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex-1 text-center">
+                <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Current</div>
+                <div className="text-xs font-semibold text-gray-700">{ex.purchase_orders?.ex_factory_date || '—'}</div>
+              </div>
+              <svg className="w-4 h-4 text-amber-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              <div className="flex-1 text-center">
+                <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Proposed</div>
+                <div className="text-xs font-semibold text-amber-700">{ex.proposed_ex_factory_date}</div>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-2">
             {ex.reason && (
@@ -146,7 +175,7 @@ function ReviewModal({ exception: ex, onClose, onDone }) {
           </button>
           <button type="button" disabled={loading} onClick={() => handle('approve')}
             className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors cursor-pointer">
-            {loading ? 'Saving…' : 'Approve & Update Date'}
+            {loading ? 'Saving…' : isCancellation ? 'Approve & Cancel Qty' : 'Approve & Update Date'}
           </button>
         </div>
       </div>
@@ -174,7 +203,8 @@ export default function OtifPendingExceptions({ canReview = false }) {
             buyer:organizations!buyer_supplier_links_buyer_org_id_fkey(display_name),
             supplier:organizations!buyer_supplier_links_supplier_org_id_fkey(display_name)
           )
-        )
+        ),
+        po_line_items(buyer_sku_ref, quantity_ordered, cancelled_quantity)
       `)
       .order('reported_at', { ascending: false })
 
@@ -262,8 +292,8 @@ export default function OtifPendingExceptions({ canReview = false }) {
                   <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">PO Number</th>
                   <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">Buyer</th>
                   <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">Supplier</th>
-                  <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">Current Ex-Factory</th>
-                  <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">Proposed Date</th>
+                  <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">Type</th>
+                  <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">Details</th>
                   <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">Reason</th>
                   <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">Reported By</th>
                   <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide">Reported At</th>
@@ -277,11 +307,19 @@ export default function OtifPendingExceptions({ canReview = false }) {
                     <td className="px-4 py-2.5 text-xs font-semibold text-gray-900">{ex.purchase_orders?.po_number || '—'}</td>
                     <td className="px-4 py-2.5 text-xs text-gray-700">{ex.purchase_orders?.buyer_supplier_links?.buyer?.display_name || '—'}</td>
                     <td className="px-4 py-2.5 text-xs text-gray-600">{ex.purchase_orders?.buyer_supplier_links?.supplier?.display_name || '—'}</td>
-                    <td className="px-4 py-2.5 text-xs text-gray-600">{ex.purchase_orders?.ex_factory_date || '—'}</td>
+                    <td className="px-4 py-2.5 text-xs text-gray-600 whitespace-nowrap">
+                      {ex.exception_type === 'quantity_cancellation' ? 'Qty Cancellation' : 'OTIF Date'}
+                    </td>
                     <td className="px-4 py-2.5">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700">
-                        {ex.proposed_ex_factory_date}
-                      </span>
+                      {ex.exception_type === 'quantity_cancellation' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700 whitespace-nowrap">
+                          {ex.po_line_items?.buyer_sku_ref || '-'} · Cancel {ex.requested_quantity}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700">
+                          {ex.proposed_ex_factory_date}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[160px]">
                       <span className="inline-block truncate max-w-full" title={ex.reason}>{ex.reason || '—'}</span>

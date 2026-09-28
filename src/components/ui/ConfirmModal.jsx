@@ -7,6 +7,7 @@ export default function ConfirmModal({
   title,
   message,
   warning,            // optional amber warning note (e.g. "This cannot be undone")
+  error,              // optional red error note, e.g. a failed confirm's message — modal stays open so it's visible
   confirmLabel = 'Delete',
   loadingLabel,       // defaults to "Deleting…" for tone="danger", "Saving…" otherwise
   tone = 'danger',    // 'danger' (red, trash icon) | 'neutral' (gray, pencil icon)
@@ -62,6 +63,11 @@ export default function ConfirmModal({
               {warning && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-2">
                   {warning}
+                </p>
+              )}
+              {error && (
+                <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 mt-2">
+                  {error}
                 </p>
               )}
             </div>

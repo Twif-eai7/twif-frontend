@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useOrgDepartment, useIsAdmin } from '../../../stores/profileStore'
 import { useShipmentContainers } from '../../../hooks/useShipmentContainers'
 import { useShipmentContainerDetail } from '../../../hooks/useShipmentContainerDetail'
@@ -20,11 +21,17 @@ export default function ShipmentContainersTab() {
   const dept = useOrgDepartment()
   const isAdmin = useIsAdmin()
   const canManage = dept === 'logistics' || isAdmin
+  const navigate = useNavigate()
 
   const [selectedBuyerOrgId, setSelectedBuyerOrgId] = useState(null)
   const [selectedBuyerName, setSelectedBuyerName]   = useState('')
   const [stage, setStage] = useState('invoices')
   const [selectedContainerId, setSelectedContainerId] = useState(null)
+  // Lifted here (not local to InvoiceGroupsPane) for the same reason
+  // selectedContainerId is: PendingWorkOverview.jsx's row click needs to be
+  // able to set it directly, landing on the specific invoice instead of just
+  // the Invoices stage's list.
+  const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [isCreating, setIsCreating] = useState(false)
   const [attachInvoicesFor, setAttachInvoicesFor] = useState(null)
 
@@ -44,11 +51,15 @@ export default function ShipmentContainersTab() {
   // the item the user clicked in the cross-buyer overview (or 'invoices' by
   // default, for the "Open workspace" link) — grouping happens on the
   // merchant side now, so logistics never lands anywhere but Invoices/Containers.
-  const jumpToBuyer = (id, name, targetStage) => {
+  // itemId (optional) opens that specific container/invoice directly instead
+  // of just landing on the list — otherwise the user has to search the PO
+  // again in whichever tab they land on.
+  const jumpToBuyer = (id, name, targetStage, itemId) => {
     setSelectedBuyerOrgId(id)
     setSelectedBuyerName(name)
     setStage(targetStage)
-    setSelectedContainerId(null)
+    setSelectedContainerId(targetStage === 'containers' ? (itemId ?? null) : null)
+    setSelectedGroupId(targetStage === 'invoices' ? (itemId ?? null) : null)
     setIsCreating(false)
   }
 
@@ -56,6 +67,7 @@ export default function ShipmentContainersTab() {
     setSelectedBuyerOrgId(null)
     setSelectedBuyerName('')
     setSelectedContainerId(null)
+    setSelectedGroupId(null)
     setIsCreating(false)
   }
 
@@ -82,9 +94,15 @@ export default function ShipmentContainersTab() {
     setIsCreating(false)
   }
 
+  // Also used for invoice attach/detach and container edits (not just
+  // recording a leg) — any of those can change an invoice's container_id or
+  // its manually-set status (e.g. InvoiceCard.jsx resetting status on
+  // unbook), both of which the Invoices tab's own list/badge reads, so it
+  // needs the same refresh or it's stale until a full reload.
   const handleShipmentRecorded = async () => {
     await refetchDetail()
     await refetchList()
+    await refetchGroups()
   }
 
   const detailOpen = isCreating || !!container
@@ -132,7 +150,7 @@ export default function ShipmentContainersTab() {
 
       <div className="flex flex-col md:flex-row overflow-hidden flex-1">
         {!selectedBuyerOrgId ? (
-          <PendingWorkOverview onJumpToBuyer={jumpToBuyer} />
+          <PendingWorkOverview onJumpToBuyer={jumpToBuyer} onBack={() => navigate('/dashboard/orders?tab=po-table')} />
         ) : stage === 'invoices' ? (
           <InvoiceGroupsPane
             buyerOrgId={selectedBuyerOrgId}
@@ -140,6 +158,8 @@ export default function ShipmentContainersTab() {
             loading={groupsLoading}
             onUpdated={handleGroupsChanged}
             onGoToContainer={goToContainer}
+            selectedGroupId={selectedGroupId}
+            onSelectGroup={setSelectedGroupId}
           />
         ) : (
           <>

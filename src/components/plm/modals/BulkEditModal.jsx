@@ -7,8 +7,11 @@ import { resolveBuyerOrgsForMember } from '../../../lib/poQueries'
 import CategorySelectField from '../CategorySelectField'
 import BuyerSkuField from '../BuyerSkuField'
 import ImageEditorModal from './ImageEditorModal'
+import RichNoteEditor from '../RichNoteEditor'
+import { notePlainText, extractImageUrls } from '../richNote'
+import { saveFormDraftDebounced, loadFormDraft, clearFormDraft } from '../../../utils/formDraft'
 
-const BASIC_FIELDS = ['description', 'material', 'finish', 'weight', 'l', 'w', 'h', 'measurement', 'tempSkuRef']
+const BASIC_FIELDS = ['description', 'material', 'finish', 'weight', 'l', 'w', 'h', 'measurement', 'tempSkuRef', 'original_price', 'original_currency']
 const LABELS = { description: 'Description', material: 'Material', finish: 'Finish', weight: 'Weight (kg)', l: 'L', w: 'W', h: 'H' }
 
 function initEdit(s) {
@@ -26,12 +29,18 @@ function initEdit(s) {
     productionSkuId: s.production_sku_id || null,
     buyerSkuRef:     s.buyer_sku_ref  || '',
     tempSkuRef:      s.temp_sku_ref   || '',
+    original_price:    s.original_price != null ? String(s.original_price) : '',
+    original_currency: s.original_currency || 'USD',
+    notesHtml:   s.notes?.html || '',
+    specImages:  Array.isArray(s.notes?.images) ? s.notes.images
+                 : (Array.isArray(s.spec_images) ? s.spec_images.map(x => x?.url).filter(Boolean) : []),
   }
 }
 
 export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode = 'new' }) {
   const patchSkus    = usePlmStore(s => s.patchSkus)
   const deleteSkus   = usePlmStore(s => s.deleteSkus)
+  const uploadNoteImage = usePlmStore(s => s.uploadNoteImage)
   const toast        = usePlmStore(s => s.toast)
   const allCatalogSkus = usePlmStore(s => s.skus)
   const memberId     = useMemberId()
@@ -51,13 +60,43 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
   const [deletingId,      setDeletingId]      = useState(null)
   const [productionSkus,  setProductionSkus]  = useState([])
   const [errors,          setErrors]          = useState({ buyerSkuRefs: new Set(), imageUpload: {}, deleteError: {}, saveError: null })
-  const [edits,           setEdits]           = useState(() =>
-    Object.fromEntries(skus.map(s => [s.id, initEdit(s)]))
-  )
+
+  // Draft autosave — nothing here is saved server-side until Save is clicked, so an accidental
+  // reload (or crash/tab close) used to silently discard whatever had been typed, including
+  // Notes text and any images added to it (attach or camera — both upload immediately on
+  // insert, so by the time an image is in notesHtml it's already a real URL, not a blob, and
+  // restores from the draft exactly like any other text field). Keyed by the exact set of SKU
+  // ids being edited (+ mode) so it only ever restores into the matching editing session.
+  const draftKey = `plm_bulkedit_draft:${mode}:${skus.map(s => s.id).sort().join(',')}`
+  // Set once inside the useState initializer below (runs exactly once, on mount) rather than
+  // read from localStorage again here — a plain useRef(loadFormDraft(...)) argument gets
+  // re-evaluated on every render even though only the first one is ever used.
+  const restoredDraftRef = useRef(false)
+  const [edits, setEdits] = useState(() => {
+    const draft = loadFormDraft(draftKey)
+    const fresh = Object.fromEntries(skus.map(s => [s.id, initEdit(s)]))
+    // Only trust the draft if it has an entry for every SKU currently being edited — a partial
+    // match (stale draft from a differently-sized batch that happens to share a key prefix)
+    // falls back to fresh instead of silently dropping fields for SKUs it doesn't cover.
+    if (draft && skus.every(s => draft[s.id])) { restoredDraftRef.current = true; return draft }
+    return fresh
+  })
+  useEffect(() => {
+    if (restoredDraftRef.current) toast?.('Restored your unsaved changes from before')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    saveFormDraftDebounced(draftKey, edits)
+  }, [draftKey, edits])
+  // Closing (X / Cancel / Skip, or a successful Save) is the one deliberate "I'm done with this"
+  // signal — clears the draft so it doesn't reappear next time these SKUs are opened for editing.
+  // A raw page refresh never reaches this at all, which is exactly the case the draft exists for.
+  const closeAndClearDraft = () => { clearFormDraft(draftKey); onClose() }
   const [imageUrls,   setImageUrls]   = useState(() =>
     Object.fromEntries(skus.map(s => [s.id, s.image_url || null]))
   )
   const [uploadingId,     setUploadingId]     = useState(null)
+  const [notesIdx,        setNotesIdx]        = useState(null)  // sku.id whose Notes editor is open
   const [editingImageSku, setEditingImageSku] = useState(null) // { id, url, revokeUrl? }
   const pickFileRef    = useRef(null)
   const pickFileSkuId  = useRef(null)
@@ -151,7 +190,8 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
         const changed =
           BASIC_FIELDS.some(f => (fields[f] || '') !== (orig[f] || '')) ||
           fields.categoryId      !== orig.categoryId ||
-          fields.productionSkuId !== orig.productionSkuId
+          fields.productionSkuId !== orig.productionSkuId ||
+          (fields.notesHtml || '') !== (orig.notesHtml || '')
         return changed ? { id: s.id, fields } : null
       })
       .filter(Boolean)
@@ -164,11 +204,11 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
       )
       if (missingIds.size > 0) { setErrors(prev => ({ ...prev, buyerSkuRefs: missingIds })); return }
     }
-    if (!patches.length) { onClose(); return }
+    if (!patches.length) { closeAndClearDraft(); return }
     setSaving(true)
     try {
       await patchSkus(patches)
-      onClose()
+      closeAndClearDraft()
     } catch (err) {
       setErrors(prev => ({ ...prev, saveError: err.message }))
     } finally {
@@ -199,26 +239,7 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
             <span className="text-[13px] font-bold uppercase tracking-[.06em]">Edit attributes</span>
             <span className="text-[12px] text-black/50 ml-2">{visibleSkus.length} SKU{visibleSkus.length === 1 ? '' : 's'}</span>
           </div>
-          <button onClick={onClose} className="text-black/40 hover:text-black text-lg leading-none cursor-pointer border-none bg-none">×</button>
-        </div>
-
-        {/* Apply category to all */}
-        <div className="px-5 py-2.5 border-b border-black/10 flex-shrink-0 flex items-center gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-[.07em] text-black/40 flex-shrink-0">Category for all:</span>
-          <div className="flex-1 max-w-xs">
-            <CategorySelectField
-              hideLabel
-              onChange={(id, name) => {
-                if (!id) return
-                setEdits(prev => {
-                  const next = { ...prev }
-                  visibleSkus.forEach(s => { next[s.id] = { ...next[s.id], categoryId: id, categoryName: name } })
-                  return next
-                })
-              }}
-            />
-          </div>
-          <span className="text-[9px] text-black/30 font-semibold uppercase tracking-[.04em]">optional — overrides per-SKU</span>
+          <button onClick={closeAndClearDraft} className="text-black/40 hover:text-black text-lg leading-none cursor-pointer border-none bg-none">×</button>
         </div>
 
         {/* Hidden file input for adding new images */}
@@ -226,15 +247,34 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
 
         {/* Cards */}
         <div className="overflow-y-auto p-5 flex flex-col gap-2.5">
+          {/* Apply category to all — lives inside the scrolling region (not fixed header
+              chrome above it) so a deep cascading pick (which can now run 4+ stacked rows
+              tall on a narrow screen) scrolls away with everything else instead of
+              permanently pinning at the top and eating most of the modal's height. */}
+          <div className="border border-black/10 px-3.5 py-2.5 flex items-center gap-3 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-[.07em] text-black/40 flex-shrink-0">Category for all:</span>
+            <div className="flex-1 min-w-[180px] max-w-xs">
+              <CategorySelectField
+                hideLabel
+                onChange={(id, name) => {
+                  if (!id) return
+                  setEdits(prev => {
+                    const next = { ...prev }
+                    visibleSkus.forEach(s => { next[s.id] = { ...next[s.id], categoryId: id, categoryName: name } })
+                    return next
+                  })
+                }}
+              />
+            </div>
+            <span className="text-[9px] text-black/30 font-semibold uppercase tracking-[.04em]">optional — overrides per-SKU</span>
+          </div>
           {visibleSkus.map(sku => {
             const e = edits[sku.id]
             return (
-              <div key={sku.id} className="border border-black/10 flex">
-                {/* Image — panel stretches with card; image itself is natural size, not h-full */}
-                <div
-                  className="bg-[#EDEAE4] flex-shrink-0 relative group/img overflow-hidden"
-                  style={{ width: 300, height: 300 }}
-                >
+              <div key={sku.id} className="border border-black/10 flex flex-col sm:flex-row">
+                {/* Image — fixed square on desktop, full-width band on narrow screens so the
+                    fields column keeps a usable width instead of being crushed. */}
+                <div className="bg-white flex-shrink-0 relative group/img overflow-hidden w-full h-64 sm:w-[300px] sm:h-[300px]">
                   {uploadingId === sku.id ? (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
                       <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
@@ -242,7 +282,7 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
                     </div>
                   ) : imageUrls[sku.id] ? (
                     <>
-                      <img src={imageUrls[sku.id]} alt={sku.auto_code} className="w-full object-cover" style={{ maxHeight: 300 }} />
+                      <img src={imageUrls[sku.id]} alt={sku.auto_code} className="absolute inset-0 w-full h-full object-contain" />
                       <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
                         <button
                           type="button"
@@ -276,7 +316,7 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
                 </div>
 
                 {/* Fields */}
-                <div className="flex-1 p-3 flex flex-col gap-1.5 border-l border-black/10 min-w-0">
+                <div className="flex-1 p-3 flex flex-col gap-1.5 border-t sm:border-t-0 sm:border-l border-black/10 min-w-0">
                   {/* SKU code + delete button */}
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[10px] font-bold uppercase tracking-[.08em] text-black/70 font-mono">
@@ -449,6 +489,95 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
                       </div>
                     </div>
                   </div>
+
+                  {/* Original Price + currency — optional */}
+                  <div className="flex gap-2 items-end">
+                    <div className="flex flex-col gap-0.5 w-1/4">
+                      <span className="text-[9px] font-bold uppercase tracking-[.07em] text-black/55">Original Price</span>
+                      <input type="number" step="0.01" min="0"
+                        className="px-2 py-1.5 border-b border-black/20 text-[12px] bg-[#e9e9e93d] outline-none focus:border-black/60 w-full"
+                        value={e.original_price}
+                        onChange={ev => setField(sku.id, 'original_price', ev.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[9px] font-bold uppercase tracking-[.07em] text-black/55">Currency</span>
+                      <select
+                        className="px-2 py-1.5 border-b border-black/20 text-[12px] bg-[#e9e9e93d] outline-none focus:border-black/60"
+                        value={e.original_currency || 'USD'}
+                        onChange={ev => setField(sku.id, 'original_currency', ev.target.value)}
+                      >
+                        {['USD', 'GBP', 'EUR'].map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Notes — rich note for this SKU. Images added inside the note also save
+                      as spec images (origin 'kaptr') and show in Media. */}
+                  <div className="flex flex-col gap-0.5 pt-0.5">
+                    <span className="text-[9px] font-bold uppercase tracking-[.07em] text-black/55">Notes</span>
+                    {notesIdx === sku.id ? (
+                      <RichNoteEditor
+                        initialHtml={e.notesHtml}
+                        // Hide (without clicking Save note) used to just discard whatever had
+                        // been typed/inserted since opening — RichNoteEditor already has a full
+                        // localStorage draft mechanism built in, it just was never connected
+                        // here. Cleared automatically once Save note actually commits it.
+                        draftKey={`plm_note_draft:${sku.id}`}
+                        sendLabel="Save note"
+                        defaultMaximized
+                        onHide={() => setNotesIdx(null)}
+                        placeholder="Reference notes for this SKU… add photos with the camera / clip"
+                        uploadImage={file => uploadNoteImage(file).then(r => r.url)}
+                        onSend={({ html, images }) => {
+                          setFields(sku.id, { notesHtml: html, specImages: images })
+                          setNotesIdx(null)
+                        }}
+                      />
+                    ) : (() => {
+                      const noteImgs = e.specImages?.length ? e.specImages : extractImageUrls(e.notesHtml)
+                      // This row always shows the last SAVED note — a draft from a previous
+                      // Hide (see RichNoteEditor's draftKey) lives only in localStorage and
+                      // can genuinely differ from what's shown here (different image, missing
+                      // text, etc.), so a plain read of it here to flag that mismatch instead
+                      // of leaving it as a silent surprise the next time this note is opened.
+                      let hasPendingDraft = false
+                      try {
+                        const raw = localStorage.getItem(`plm_note_draft:${sku.id}`)
+                        const draft = raw ? JSON.parse(raw) : null
+                        hasPendingDraft = !!draft?.html && draft.html !== (e.notesHtml || '')
+                      } catch { /* ignored — localStorage/JSON failures just mean no badge */ }
+                      return (
+                      <button type="button" onClick={() => setNotesIdx(sku.id)}
+                        className="text-left px-2 py-1.5 border-b border-black/20 text-[12px] bg-[#e9e9e93d] hover:border-black/60 transition-colors">
+                        {hasPendingDraft && (
+                          <span className="block mb-1 text-[9px] font-bold uppercase tracking-[.05em] text-[#8a6d1a]">● Unsaved draft — differs from what's shown below</span>
+                        )}
+                        {e.notesHtml
+                          ? <span className="flex items-start gap-1.5" title="Edit note">
+                              {noteImgs.length > 0 && (
+                                <span className="flex gap-1 flex-shrink-0">
+                                  {noteImgs.slice(0, 3).map((url, k) => (
+                                    <img key={k} src={url} alt="" className="w-8 h-8 object-cover rounded-sm border border-black/10" />
+                                  ))}
+                                  {noteImgs.length > 3 && (
+                                    <span className="text-[9px] font-semibold text-black/40 self-center">+{noteImgs.length - 3}</span>
+                                  )}
+                                </span>
+                              )}
+                              <span className="text-black/70 line-clamp-2 break-words min-w-0">{notePlainText(e.notesHtml).slice(0, 140) || (noteImgs.length ? '(note with images)' : '(empty note)')}</span>
+                            </span>
+                          : (hasPendingDraft
+                              ? <span className="text-black/35">(unsaved draft — click to review)</span>
+                              : <span className="text-black/35">+ Add notes</span>)}
+                      </button>
+                      )
+                    })()}
+                    {e.notesHtml && (e.specImages?.length > 0) && (
+                      <span className="text-[9px] text-black/40 mt-0.5">{e.specImages.length} spec image{e.specImages.length === 1 ? '' : 's'} → Media</span>
+                    )}
+                  </div>
                 </div>
               </div>
             )
@@ -460,7 +589,7 @@ export default function BulkEditModal({ skus, role, onClose, isFromUpload, mode 
           {errors.saveError && (
             <span className="text-[10px] font-semibold text-red-500 uppercase tracking-[.04em] mr-auto">{errors.saveError}</span>
           )}
-          <button onClick={onClose} className="px-4 py-2 text-[11px] font-bold uppercase tracking-[.06em] border border-black/20 bg-white cursor-pointer hover:bg-black/5">
+          <button onClick={closeAndClearDraft} className="px-4 py-2 text-[11px] font-bold uppercase tracking-[.06em] border border-black/20 bg-white cursor-pointer hover:bg-black/5">
             {isFromUpload ? 'Skip for now' : 'Cancel'}
           </button>
           <button onClick={handleSave} disabled={saving}

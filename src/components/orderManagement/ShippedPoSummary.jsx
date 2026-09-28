@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useShippedPO, labelToSlug, extractMonthKey } from "../../hooks/useShippedPoSummary";
 import { isShippedPoOnTime } from "../../utils/shippedPoTiming";
 import { exportToXLSX, exportToPDF } from '../../utils/poExport';
+import { supabase } from '../../lib/supabase';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const COLS = [
@@ -168,6 +169,7 @@ export default function ShippedPoSummary({
   defaultMonth        = "",
   defaultMerchant     = "",
   defaultVendor       = "",
+  defaultVendors      = [],
   defaultTimingFilter = "",
   merchantList        = [],
   isAdmin             = false,
@@ -177,6 +179,12 @@ export default function ShippedPoSummary({
   const [buyer, setBuyer]             = useState(defaultBuyer);
   const [vendor, setVendor]           = useState(defaultVendor);
   const [merchant, setMerchant] = useState(defaultMerchant);
+  // Hidden baseline vendor scope (e.g. a merchant's resolved supplier access) —
+  // restricts rows before the user's own visible vendor dropdown filter applies.
+  const allowedVendorSet = useMemo(
+    () => defaultVendors.length ? new Set(defaultVendors.map(v => v.trim())) : null,
+    [defaultVendors]
+  );
   // monthFilter is stored as a label ("April 2026") but converted to slug for the API
   const [monthFilter, setMonthFilter] = useState(defaultMonth);
   const [search, setSearch]           = useState("");
@@ -202,13 +210,41 @@ export default function ShippedPoSummary({
     loading, error, refetch, invalidateAll, fetchAllForExport,
   } = useShippedPO({ year, buyer, month: monthSlugForApi, merchant, page: timingActive ? 1 : page, pageSize: timingActive ? 99999 : PAGE_SIZE, isAdmin });
 
+  const vendorDropdownOptions = useMemo(
+    () => allowedVendorSet ? vendorList.filter(v => allowedVendorSet.has(v)) : vendorList,
+    [vendorList, allowedVendorSet]
+  );
+
+  // On Time/Late is judged against the PO's real final_date (purchase_orders
+  // table), not the Excel-derived shippedDate on the row — the Excel data
+  // isn't reliable enough for this comparison. Fetched once per loaded row
+  // set, keyed by PO number, only while the timing filter is actually active
+  // (rows are already fully loaded at that point — see pageSize above).
+  const [finalDateByPo, setFinalDateByPo] = useState({});
+  useEffect(() => {
+    if (!timingActive) return;
+    const poNos = [...new Set(rows.map(r => r.poNo).filter(Boolean))];
+    if (!poNos.length) { setFinalDateByPo({}); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('purchase_orders')
+        .select('po_number, final_date')
+        .in('po_number', poNos);
+      if (cancelled) return;
+      setFinalDateByPo(Object.fromEntries((data || []).map(po => [po.po_number, po.final_date])));
+    })();
+    return () => { cancelled = true };
+  }, [timingActive, rows]);
+
   // Client-side filter predicate — shared by the on-screen table (filteredRows,
   // below) and the export handler, so a downloaded file can never diverge from
   // what's currently shown on screen.
   const matchesClientFilters = (r) => {
+    if (allowedVendorSet && !allowedVendorSet.has((r.vendor || "").trim())) return false;
     if (vendor && (r.vendor || "").trim() !== vendor) return false;
     if (timingFilter !== 'All') {
-      const onTime = isShippedPoOnTime(r.shippedDate, r.target)
+      const onTime = isShippedPoOnTime(finalDateByPo[r.poNo], r.target)
       if (onTime == null) return false
       if (timingFilter === 'Late'    && onTime) return false
       if (timingFilter === 'On Time' && !onTime) return false
@@ -279,11 +315,12 @@ export default function ShippedPoSummary({
   }, [timingActive])
 
   // ── Client-side filtering (vendor + search + timing — everything else is server) ─
-  const filteredRows = useMemo(() => rows.filter(matchesClientFilters), [rows, buyer, vendor, search, timingFilter]);
+  const filteredRows = useMemo(() => rows.filter(matchesClientFilters), [rows, buyer, vendor, search, timingFilter, allowedVendorSet, finalDateByPo]);
 
   const gt = useMemo(() => {
-    // Use server overall only when no client-side filters are active
-    if (!vendor && timingFilter === 'All' && !search) return overall ?? {}
+    // Use server overall only when no client-side filters (including the hidden
+    // baseline vendor scope) are active
+    if (!vendor && timingFilter === 'All' && !search && !allowedVendorSet) return overall ?? {}
     // Any client-side filter active — recompute totals from filtered rows
     return {
       orderValue:     filteredRows.reduce((s, r) => s + (r.orderValue     || 0), 0),
@@ -293,7 +330,7 @@ export default function ShippedPoSummary({
       totalPoCount:   new Set(filteredRows.map(r => `${r.vendor}__${r.poNo}`)).size,
       totalLineCount: filteredRows.length,
     }
-  }, [vendor, timingFilter, search, overall, filteredRows])
+  }, [vendor, timingFilter, search, allowedVendorSet, overall, filteredRows])
 
   // ── Page-level totals (fallback when server overall isn't available) ─────────
   const totals = useMemo(() => ({
@@ -583,7 +620,7 @@ export default function ShippedPoSummary({
         <Chip label="Balance"      value={fmt(gt.balanceValue   ?? totals.balance, true)} dot="#d97706" />
         <Chip label="Shipped POs"  value={(gt.totalPoCount   ?? totals.shippedPOs).toLocaleString()} dot="#9ca3af" />
         <Chip label="Total Lines"  value={(gt.totalLineCount ?? filteredRows.length).toLocaleString()} dot="#9ca3af" />
-        <Chip label="Customers"    value={(vendor || timingFilter !== 'All' || search ? totals.customers : (totalCustomers || totals.customers)).toLocaleString()} dot="#9ca3af" />
+        <Chip label="Customers"    value={(vendor || timingFilter !== 'All' || search || allowedVendorSet ? totals.customers : (totalCustomers || totals.customers)).toLocaleString()} dot="#9ca3af" />
       </div>
 
       {/* Toolbar */}
@@ -613,7 +650,7 @@ export default function ShippedPoSummary({
         <Dropdown
           icon={<svg className="w-3.5 h-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>}
           placeholder="All Vendors"
-          options={vendorList}
+          options={vendorDropdownOptions}
           value={vendor}
           onChange={setVendor}
         />
@@ -668,7 +705,7 @@ export default function ShippedPoSummary({
         </button>
 
         <span className="ml-auto text-xs text-gray-400 whitespace-nowrap">
-          {(gt.totalLineCount ?? 0).toLocaleString()} rows · {(vendor || timingFilter !== 'All' || search ? totals.customers : (totalCustomers ?? 0)).toLocaleString()} customers
+          {(gt.totalLineCount ?? 0).toLocaleString()} rows · {(vendor || timingFilter !== 'All' || search || allowedVendorSet ? totals.customers : (totalCustomers ?? 0)).toLocaleString()} customers
         </span>
       </div>
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useMemberId } from '../stores/profileStore'
+import { useBuyerOptions } from './useBuyerOptions'
 import { FALLBACK_RATES, fetchLiveRates, convertToUSD } from '../utils/formatters'
 import { uploadToShipmentBucket, SHIPMENT_BUCKET } from '../lib/shipmentStorage'
 import { publicUrl } from '../components/orderManagement/poUtils'
@@ -9,9 +10,16 @@ function emptyInvoice() {
   return {
     _id: 0,
     primary_vendor_org_id: '', invoice_number: '', invoice_date: '', invoice_value: '',
-    currency: 'USD', cbm: '', additional_charges: '', discount: '',
+    currency: 'USD', cbm: '', additional_charges: '',
     payment_status: '', payment_term: '', tracking_details: '', po_ids: [],
   }
+}
+
+// One-off buyer preference: House Doctor invoices these in EUR, everyone
+// else in USD — still just a prefill default, never enforced, so it can be
+// changed per invoice in the CCY dropdown same as always.
+function defaultCurrencyForBuyer(buyerName) {
+  return buyerName?.trim().toLowerCase() === 'house doctor' ? 'EUR' : 'USD'
 }
 
 // Shared raise/edit logic for a shipment_invoices "group" row — used by both
@@ -22,8 +30,10 @@ function emptyInvoice() {
 // `active` gates data fetching (live FX rates) and the invoice-state sync
 // effect — pass the modal's `open` or, for an inline pane, whether a group
 // is currently selected.
-export function useInvoiceDetailsForm({ active, invoiceGroup, onSaved }) {
+export function useInvoiceDetailsForm({ active, invoiceGroup, buyerOrgId, onSaved }) {
   const memberId  = useMemberId()
+  const { buyers } = useBuyerOptions()
+  const buyerName = buyers.find(b => b.id === buyerOrgId)?.name
   // "Raised" is a deliberate action (invoice_raised_at), never a side effect
   // of typing something into invoice_number — see sql/invoice_raised_at.sql.
   const isRaising = !invoiceGroup?.invoice_raised_at
@@ -48,19 +58,36 @@ export function useInvoiceDetailsForm({ active, invoiceGroup, onSaved }) {
         primary_vendor_org_id: invoiceGroup.primary_vendor_org_id || '',
         invoice_number: invoiceGroup.invoice_number || '',
         invoice_date: invoiceGroup.invoice_date || '',
-        invoice_value: invoiceGroup.invoice_value != null ? String(invoiceGroup.invoice_value) : '',
-        currency: invoiceGroup.invoice_currency || 'USD',
+        // Prefilled from the group's own SKU balance values (same figure
+        // PendingWorkOverview.jsx's Value column shows) whenever no invoice
+        // value has actually been saved yet — a saved value always wins,
+        // since the real invoice can legitimately differ (currency,
+        // negotiated final amount, additional charges).
+        invoice_value: invoiceGroup.invoice_value != null
+          ? String(invoiceGroup.invoice_value)
+          : invoiceGroup.calculated_value ? String(invoiceGroup.calculated_value.toFixed(2)) : '',
+        // A saved currency always wins. Otherwise prefer the group's own
+        // POs' real currency (calculated_value_currency — only set when
+        // every PO on the group shares one currency) over the buyer-name
+        // guess, since actual booked data beats a heuristic; the buyer
+        // default only ever kicks in for a bare group with no POs yet, or
+        // POs that already disagree on currency.
+        currency: invoiceGroup.invoice_currency || invoiceGroup.calculated_value_currency || defaultCurrencyForBuyer(buyerName),
         cbm: invoiceGroup.cbm != null ? String(invoiceGroup.cbm) : '',
         additional_charges: invoiceGroup.additional_charges != null ? String(invoiceGroup.additional_charges) : '',
-        discount: invoiceGroup.discount != null ? String(invoiceGroup.discount) : '',
         payment_status: invoiceGroup.payment_status || '',
         payment_term: invoiceGroup.payment_term || '',
         tracking_details: invoiceGroup.tracking_details || '',
         po_ids: (invoiceGroup.pos ?? []).map(po => po.id),
       })
     }
+    // buyerName is intentionally included despite the general rule of only
+    // re-syncing on invoiceGroup identity change — useBuyerOptions' own
+    // fetch can still be in flight the instant this modal opens, and this
+    // only matters for the one-time currency default anyway (a real saved
+    // value already wins over it regardless of when this fires).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, invoiceGroup?.id])
+  }, [active, invoiceGroup?.id, buyerName])
 
   // "Save" (always allowed) vs "Raise Invoice" (gated) are two buttons over
   // the same save operation — logistics can jot down partial/placeholder
@@ -90,7 +117,6 @@ export function useInvoiceDetailsForm({ active, invoiceGroup, onSaved }) {
         invoice_value: invoice.invoice_value || null,
         cbm: invoice.cbm || null,
         additional_charges: invoice.additional_charges || null,
-        discount: invoice.discount || null,
         payment_status: invoice.payment_status.trim(),
         payment_term: invoice.payment_term.trim(),
         tracking_details: invoice.tracking_details.trim(),
@@ -122,37 +148,50 @@ export function useInvoiceDetailsForm({ active, invoiceGroup, onSaved }) {
           .insert(toAdd.map(po_id => ({ shipment_invoice_id: invoiceGroup.id, po_id })))
         if (addErr) throw addErr
 
-        // Take these POs out of the draft pool so they can't be picked up
-        // into a second group — mirrors what create_shipment_plan_group does
-        // for POs grouped at creation time.
-        const { error: groupErr } = await supabase.from('po_shipment_plans')
-          .update({ status: 'grouped', shipment_invoice_id: invoiceGroup.id, updated_on: new Date().toISOString(), updated_by: memberId })
+        // A PO can now have more than one simultaneously-active plan (batched
+        // shipments), so a blanket po_id match would fold ALL of a PO's
+        // active plans into this one invoice — colliding with
+        // shipment_invoice_pos' own (shipment_invoice_id, po_id) uniqueness
+        // and silently dropping every plan but one from po_id-keyed
+        // aggregation downstream. Resolve exactly one plan per PO instead
+        // (oldest first, deterministic) — mirrors what
+        // create_shipment_plan_group does for POs grouped at creation time.
+        const { data: activePlans, error: plansErr } = await supabase
+          .from('po_shipment_plans')
+          .select('id, po_id, planned_on')
           .in('po_id', toAdd).in('status', ['draft', 'pending'])
-        if (groupErr) throw groupErr
+          .order('planned_on', { ascending: true })
+        if (plansErr) throw plansErr
+
+        const planIdByPoId = {}
+        ;(activePlans || []).forEach(p => {
+          if (!(p.po_id in planIdByPoId)) planIdByPoId[p.po_id] = p.id
+        })
+        const planIdsToGroup = Object.values(planIdByPoId)
+
+        if (planIdsToGroup.length) {
+          const { error: groupErr } = await supabase.from('po_shipment_plans')
+            .update({ status: 'grouped', shipment_invoice_id: invoiceGroup.id, updated_on: new Date().toISOString(), updated_by: memberId })
+            .in('id', planIdsToGroup)
+          if (groupErr) throw groupErr
+        }
       }
       if (toRemove.length) {
         const { error: rmErr } = await supabase.from('shipment_invoice_pos')
           .delete().eq('shipment_invoice_id', invoiceGroup.id).in('po_id', toRemove)
         if (rmErr) throw rmErr
 
-        // Return each removed PO's plan to draft so it can be re-grouped —
-        // one at a time, since the "one active plan per PO" unique index
-        // can reject an individual row (e.g. the PO was already re-planned
-        // elsewhere) without that blocking the others. Only fall back to
-        // 'cancelled' for that specific conflict — any other error (e.g. a
-        // permissions issue) should surface, not be swallowed.
-        for (const poId of toRemove) {
-          const { error: revertErr } = await supabase.from('po_shipment_plans')
-            .update({ status: 'draft', shipment_invoice_id: null, updated_on: new Date().toISOString(), updated_by: memberId })
-            .eq('shipment_invoice_id', invoiceGroup.id).eq('po_id', poId).eq('status', 'grouped')
-          if (revertErr) {
-            if (revertErr.code !== '23505') throw revertErr
-            const { error: cancelErr } = await supabase.from('po_shipment_plans')
-              .update({ status: 'cancelled', updated_on: new Date().toISOString(), updated_by: memberId })
-              .eq('shipment_invoice_id', invoiceGroup.id).eq('po_id', poId).eq('status', 'grouped')
-            if (cancelErr) throw cancelErr
-          }
-        }
+        // Return each removed PO's plan to draft so it can be re-grouped. A
+        // PO can now hold more than one active plan at once, so this can no
+        // longer collide with another draft/pending plan for the same PO —
+        // one batched update is enough. planned_by is left untouched — the
+        // original planner should still find their own plan reverted back to
+        // draft; useMyShipmentPlans.js grants admin/owner/tech full
+        // cross-planner visibility instead of reassigning ownership away.
+        const { error: revertErr } = await supabase.from('po_shipment_plans')
+          .update({ status: 'draft', shipment_invoice_id: null, updated_on: new Date().toISOString(), updated_by: memberId })
+          .eq('shipment_invoice_id', invoiceGroup.id).in('po_id', toRemove).eq('status', 'grouped')
+        if (revertErr) throw revertErr
       }
 
       onSaved?.()

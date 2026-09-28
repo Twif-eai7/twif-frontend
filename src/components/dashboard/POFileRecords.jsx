@@ -265,7 +265,7 @@ function MonthSection({ name, path, hook }) {
 
 function BuyerCard({ buyer, hook, index }) {
   const { expanded, toggleBuyer, getItems } = hook;
-  const { displayName, basePath } = buyer;
+  const { displayName, basePath, fileCount } = buyer;
   const isOpen = !!expanded[basePath];
   const items = getItems(basePath) || [];
   const months = items.filter(i => i.id === null);
@@ -294,7 +294,7 @@ function BuyerCard({ buyer, hook, index }) {
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-xs font-bold px-2.5 py-1 rounded-full transition-colors
             ${isOpen ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
-            {months.length}
+            {fileCount ?? 0}
           </span>
           <div className={`w-7 h-7 rounded-full flex items-center justify-center
             transition-all duration-200 ${isOpen ? 'bg-blue-100' : 'bg-slate-100'}`}>

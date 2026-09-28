@@ -59,13 +59,13 @@ export default function FilterDropdown({ options, value, onSelect, placeholder }
       <button
         type="button"
         onClick={handleToggle}
-        className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 md:px-2.5 md:py-1.5 text-[9px] md:text-[9px] font-semibold uppercase tracking-[.06em] cursor-pointer hover:opacity-60 transition-opacity whitespace-nowrap border
-          ${selectedLabel ? 'border-[#1A1A18]/60 bg-[#1A1A18]/[.04]' : 'border-black/20 bg-white'}`}
+        className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 md:px-2.5 md:py-1.5 text-[9px] md:text-[9px] font-semibold uppercase tracking-[.06em] cursor-pointer transition-colors whitespace-nowrap border
+          ${selectedLabel ? 'border-[#1A1A18] bg-[#1A1A18] hover:opacity-90' : 'border-black/20 bg-white hover:opacity-60'}`}
       >
-        {selectedLabel && <span className="w-1.5 h-1.5 rounded-full bg-[#1A1A18] flex-shrink-0" />}
-        <span className="text-[#1A1A18]">{placeholder}</span>
+        {selectedLabel && <span className="w-1.5 h-1.5 rounded-full bg-white flex-shrink-0" />}
+        <span className={selectedLabel ? 'text-white' : 'text-[#1A1A18]'}>{placeholder}</span>
         <svg
-          className={`w-2.5 h-2.5 md:w-3.5 md:h-3.5 text-black/40 transition-transform duration-150 flex-shrink-0 ${open ? 'rotate-180' : ''}`}
+          className={`w-2.5 h-2.5 md:w-3.5 md:h-3.5 transition-transform duration-150 flex-shrink-0 ${open ? 'rotate-180' : ''} ${selectedLabel ? 'text-white/70' : 'text-black/40'}`}
           viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
         >
           <polyline points="6 9 12 15 18 9"/>
