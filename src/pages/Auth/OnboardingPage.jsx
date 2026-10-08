@@ -9,7 +9,7 @@ import NdaAgreementText from '../../components/shared/NdaAgreementText'
 import { MODE_TO_STORAGE } from '../../lib/signatureMode'
 import { useOrgLookup } from '../../hooks/useOrgLookup'
 import { usePortalUser } from '../../hooks/usePortalUser'
-import { isOrgLive, useProfileStore } from '../../stores/profileStore'
+import { homePathForMembership, isOrgLive, useProfileStore } from '../../stores/profileStore'
 import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
 import { formatErrorFor, GSTIN_RE } from '../../utils/fieldFormats'
@@ -993,7 +993,7 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
         >
           {isVendorEntrance ? "Vendor's Organisation details" : 'Organisation details'}
         </h1>
-        {!publicEntry && (
+        {onBack && (
           <button type="button" onClick={onBack} className="text-sm text-stone-400 hover:text-stone-700 transition-colors flex-shrink-0 mt-1">
             ← Back
           </button>
@@ -1047,7 +1047,7 @@ function CreateOrgStep({ role, isVendorEntrance, publicEntry, form, setField, ca
       </div>
 
       <div className="flex items-center justify-between gap-3 mt-4">
-        <Button type="button" variant="secondary" className="py-3" disabled={isFirstTab} onClick={goPrev}>
+        <Button type="button" variant="secondary" className="py-3" disabled={isFirstTab && !onBack} onClick={goPrev}>
           ← Previous
         </Button>
 
@@ -1220,7 +1220,16 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
 
   // A saved draft (from a refresh) wins over the default entry step — but never
   // in pendingReview mode, which is a deliberate deep-link to the status screen.
-  const [draft] = useState(() => (pendingReview ? null : loadDraft(email, publicEntry)))
+  // A supplier draft must not skip the role picker on this flow.
+  const [draft] = useState(() => {
+    if (pendingReview) return null
+    const snap = loadDraft(email, publicEntry)
+    if (!snap) return null
+    // A saved supplier draft must not skip "What describes you?" and reopen
+    // vendor registration for this email.
+    if (!publicEntry && !routeForcedRole && snap.role === 'supplier') return null
+    return snap
+  })
 
   // Public website link opens the vendor form immediately (step 2).
   // forcedRole (from /auth/buyer or /auth/vendor) skips the role picker —
@@ -1291,7 +1300,6 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
   const { markOnboardingComplete } = usePortalUser(currentUser)
 
   const profileFetched   = useProfileStore((s) => s.profileFetched)
-  const portalUser       = useProfileStore((s) => s.portalUser)
   const orgMembership    = useProfileStore((s) => s.orgMembership)
 
   const { session, loading: authLoading } = useAuth()
@@ -1303,13 +1311,13 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
     if (!email && !session) navigate('/auth', { replace: true })
   }, [email, session, authLoading, navigate, publicEntry])
 
-  // Guard: already onboarded AND approved → send to dashboard
+  // Already in a live organisation — leave registration, including the vendor form.
   useEffect(() => {
     if (publicEntry) return
-    if (!pendingReview && profileFetched && portalUser?.onboarding_completed && isOrgLive(orgMembership)) {
-      navigate('/dashboard', { replace: true })
+    if (!pendingReview && profileFetched && isOrgLive(orgMembership)) {
+      navigate(homePathForMembership(orgMembership), { replace: true })
     }
-  }, [pendingReview, profileFetched, portalUser, orgMembership, navigate, publicEntry])
+  }, [pendingReview, profileFetched, orgMembership, navigate, publicEntry])
 
   // Poll for approval when on the pending review screen.
   // Refreshes the profile every 10s — redirects to dashboard as soon as org membership appears.
@@ -1349,6 +1357,13 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
   function toggleNdaCheck(key) {
     setNdaChecks(p => ({ ...p, [key]: !p[key] }))
     setSubmitError('')
+  }
+
+  async function leaveRegistration(path = '/auth') {
+    clearDraft()
+    reset()
+    if (supabase) await supabase.auth.signOut({ scope: 'local' })
+    navigate(path, { replace: true })
   }
 
   function handleRoleContinue() {
@@ -1682,7 +1697,7 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
           onCompanyName={v => setField('businessName', v)}
           orgEmail={form.orgEmail}
           onOrgEmail={v => setField('orgEmail', v)}
-          onBack={() => navigate(forcedRole ? `/auth/${forcedRole === 'buyer' ? 'buyer' : 'vendor'}` : '/auth', { state: { email } })}
+          onBack={() => leaveRegistration('/auth')}
           error={submitError}
         />
       )}
@@ -1704,14 +1719,12 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
             // forcedRole flows never show the role picker — exit straight back
             // to the entrance page they came from instead of showing step 0.
             if (forcedRole) {
-              // Leaving the flow entirely — discard the saved draft.
-              clearDraft()
               // OTP is already verified here, so the session is live — without
               // signing out, AuthPage's redirect guard bounces the user right
-              // back to this page. The next email submit signs out anyway.
-              if (supabase) await supabase.auth.signOut({ scope: 'local' })
-              navigate(`/auth/${forcedRole === 'buyer' ? 'buyer' : 'vendor'}`, { state: { email } })
+              // back into vendor registration.
+              await leaveRegistration(`/auth/${forcedRole === 'buyer' ? 'buyer' : 'vendor'}`)
             } else {
+              clearDraft()
               setStep(0)
             }
           }}
@@ -1734,7 +1747,15 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
           error={showPreview ? '' : submitError}
           submitting={submitting}
           onSubmit={handleReviewSubmit}
-          onBack={publicEntry ? undefined : () => setStep(1)}
+          onBack={() => {
+            if (publicEntry || forcedRole) {
+              leaveRegistration(publicEntry ? '/auth' : `/auth/${forcedRole === 'buyer' ? 'buyer' : 'vendor'}`)
+              return
+            }
+            clearDraft()
+            reset()
+            setStep(0)
+          }}
         />
       )}
 

@@ -6,6 +6,7 @@ import { OTPInput, Alert, Spinner } from '../../components/ui'
 import { useOTPTimer } from '../../hooks/useOtpTimer'
 import { usePortalUser } from '../../hooks/usePortalUser'
 import { verifyEmailOtp, OTP_LENGTH } from '../../lib/authOtp'
+import { attachMembershipByEmail, homePathForMembership, isOrgLive } from '../../stores/profileStore'
 
 export default function OTPPage({ forcedRole: routeForcedRole }) {
   const navigate = useNavigate()
@@ -32,19 +33,30 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
 
   useEffect(() => {
     if (!verifiedUser || onboardingCompleted === null) return
+    let cancelled = false
 
-    if (mode === 'signup' || !onboardingCompleted) {
-      const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
-      navigate(onboardingPath, { state: { email, userId: verifiedUser.id, returnUrl, forcedRole } })
-      return
-    }
+    async function routeAfterOtp() {
+      const existing = await attachMembershipByEmail()
+      if (cancelled) return
 
-    if (returnUrl) {
-      navigate(returnUrl, { replace: true })
-      return
-    }
+      // Already in an organisation — don't drop them into vendor registration
+      // just because this login started from the vendor entrance or signup.
+      if (isOrgLive(existing)) {
+        navigate(returnUrl || homePathForMembership(existing), { replace: true })
+        return
+      }
 
-    async function routeByOrg() {
+      if (mode === 'signup' || !onboardingCompleted) {
+        const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
+        navigate(onboardingPath, { state: { email, userId: verifiedUser.id, returnUrl, forcedRole } })
+        return
+      }
+
+      if (returnUrl) {
+        navigate(returnUrl, { replace: true })
+        return
+      }
+
       if (!supabase) return
       const { data } = await supabase
         .from('organization_members')
@@ -72,7 +84,8 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
       }
     }
 
-    routeByOrg()
+    routeAfterOtp()
+    return () => { cancelled = true }
   }, [verifiedUser, onboardingCompleted, mode, email, navigate, returnUrl, forcedRole])
 
   async function handleComplete(code) {

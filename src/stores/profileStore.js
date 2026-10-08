@@ -16,6 +16,50 @@ export function isOrgLive(orgMembership) {
   return s !== 'pending' && s !== 'rejected' && s !== 'suspended'
 }
 
+export function homePathForMembership(orgMembership) {
+  if (orgMembership?.orgType === 'merchant' && ['admin', 'owner'].includes(orgMembership.role)) {
+    return '/admin/approvals'
+  }
+  if (orgMembership?.orgType === 'merchant') return '/merchant-dashboard'
+  return '/dashboard'
+}
+
+const MEMBER_SELECT = 'id, role, full_name, email, user_id, department, allowed_modules, assigned_regions, organizations(id, type, name, display_name, status, logo_url)'
+
+function membershipFromRow(om) {
+  const org = om?.organizations ?? null
+  if (!org) return null
+  return {
+    memberId: om.id,
+    orgId: org.id,
+    orgType: org.type,
+    orgName: org.name,
+    orgDisplayName: org.display_name,
+    orgLogoUrl: org.logo_url,
+    orgStatus: org.status || null,
+    role: om.role,
+    fullName: om.full_name || null,
+    department: om.department || null,
+    allowedModules: om.allowed_modules ?? null,
+    assignedRegions: om.assigned_regions ?? null,
+  }
+}
+
+/** Attach a pre-existing member row (matched by email) to this login, via the backend. */
+export async function attachMembershipByEmail() {
+  if (!supabase) return null
+  const base = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, '')
+  if (!base) return null
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) return null
+  const res = await fetch(`${base}/org-customers/my-membership`, {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  })
+  if (!res.ok) return null
+  const json = await res.json().catch(() => ({}))
+  return membershipFromRow(json.data)
+}
+
 function computeProfileHeader(pu, orgMembership) {
   if (!pu && !orgMembership) return null
   const fullName     = orgMembership?.fullName || ''
@@ -69,33 +113,28 @@ export const useProfileStore = create(
 
           const { data: om, error: omErr } = await supabase
             .from('organization_members')
-            .select('id, role, full_name, department, allowed_modules, assigned_regions, organizations(id, type, name, display_name, status, logo_url)')
+            .select(MEMBER_SELECT)
             .eq('user_id', userId)
             .maybeSingle()
 
           if (omErr) throw omErr
 
-          const org = om?.organizations ?? null
-          const orgMembership = org
-            ? {
-                memberId: om.id,
-                orgId: org.id,
-                orgType: org.type,
-                orgName: org.name,
-                orgDisplayName: org.display_name,
-                orgLogoUrl: org.logo_url,
-                orgStatus: org.status || null,
-                role: om.role,
-                fullName: om.full_name || null,
-                department: om.department || null,
-                allowedModules: om.allowed_modules ?? null,
-                assignedRegions: om.assigned_regions ?? null,
-              }
-            : null
+          let orgMembership = membershipFromRow(om)
+          if (!orgMembership) {
+            orgMembership = await attachMembershipByEmail()
+          }
+
+          let portalUser = pu ?? null
+          if (orgMembership && isOrgLive(orgMembership)) {
+            if (portalUser && !portalUser.onboarding_completed) {
+              portalUser = { ...portalUser, onboarding_completed: true }
+            }
+            supabase.from('portal_users').update({ onboarding_completed: true }).eq('id', userId)
+          }
 
           set(
             {
-              portalUser: pu ?? null,
+              portalUser,
               orgMembership,
               profileHeader: computeProfileHeader(pu, orgMembership),
               profileLoading: false,

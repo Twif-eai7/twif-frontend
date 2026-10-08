@@ -4,7 +4,7 @@ import { AuthSplitLayout, AuthEmailField, AuthGradientButton } from '../../compo
 import { Alert } from '../../components/ui'
 import { useEmailAuth } from '../../hooks/useEmailAuth'
 import { useAuth } from '../../hooks/useAuth'
-import { isOrgLive, useProfileStore } from '../../stores/profileStore'
+import { homePathForMembership, isOrgLive, useProfileStore } from '../../stores/profileStore'
 
 const MODES = {
   login: {
@@ -50,27 +50,20 @@ export default function AuthPage({ forcedRole, defaultMode = 'login' }) {
 
     const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
 
+    // An existing organisation wins over an unfinished signup flag, and over
+    // the vendor-only entrance. Otherwise these accounts get stuck in
+    // vendor registration with no way back.
+    if (isOrgLive(orgMembership)) {
+      navigate(homePathForMembership(orgMembership), { replace: true })
+      return
+    }
+
     if (!portalUser || !portalUser.onboarding_completed) {
       navigate(onboardingPath, { state: { email: user?.email, forcedRole }, replace: true })
       return
     }
 
-    if (!isOrgLive(orgMembership)) {
-      navigate(onboardingPath, { state: { email: user?.email, pendingReview: true, forcedRole }, replace: true })
-      return
-    }
-
-    const orgType = orgMembership?.orgType
-    const role = orgMembership?.role
-
-    if (orgType === 'merchant') {
-      navigate(
-        ['admin', 'owner'].includes(role) ? '/admin/approvals' : '/merchant-dashboard',
-        { replace: true }
-      )
-    } else {
-      navigate('/dashboard', { replace: true })
-    }
+    navigate(onboardingPath, { state: { email: user?.email, pendingReview: true, forcedRole }, replace: true })
   }, [session, authLoading, profileFetched, portalUser, orgMembership, user, navigate, searchParams, forcedRole])
 
   const returnUrl = searchParams.get('return_url')
