@@ -2,6 +2,8 @@ import { Outlet } from 'react-router-dom'
 import Sidebar from '../../components/ui/Sidebar'
 import Header from '../../components/ui/Header'
 import SendRecipientsModal from '../../components/ui/SendRecipientsModal'
+import ErrorBoundary from '../../components/shared/ErrorBoundary'
+import DueDateAlertToast from '../../components/pm/shared/DueDateAlertToast'
 import { useDashboardData } from '../../hooks/useDashboardData'
 import { useUiStore } from '../../stores/uiStore'
 import { useOrgDepartment, useProfileHeader, useRole, useAllowedModules } from '../../stores/profileStore'
@@ -54,12 +56,13 @@ export default function Dashboard({ children }) {
                 </button>
               </div>
             )}
-            {children ?? <Outlet />}
+            {children ?? <ErrorBoundary><Outlet /></ErrorBoundary>}
           </div>
         </section>
       </main>
 
       <SendRecipientsModal />
+      <DueDateAlertToast />
     </div>
   )
 }

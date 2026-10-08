@@ -18,9 +18,8 @@ function KpiCard({ id, title, value, change, status }) {
         <div className="text-xl sm:text-2xl font-semibold text-gray-900">{value}</div>
         {change && (
           <div
-            className={`mt-1 flex items-center gap-1 text-xs font-medium ${
-              isPositive ? 'text-green-600' : isNegative ? 'text-red-600' : 'text-gray-500'
-            }`}
+            className={`mt-1 flex items-center gap-1 text-xs font-medium ${isPositive ? 'text-green-600' : isNegative ? 'text-red-600' : 'text-gray-500'
+              }`}
           >
             {isPositive && <span>▲</span>}
             {isNegative && <span>▼</span>}

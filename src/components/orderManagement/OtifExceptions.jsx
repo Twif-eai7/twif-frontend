@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useProfileStore } from '../../stores/profileStore'
 import { publicUrl } from './poUtils'
+import NewTaskFromSourceModal from '../pm/project/NewTaskFromSourceModal'
 
 // Redesigned to match a "control panel" mock (stat cards, segmented type
 // filter, delta badges, inline audit-trail expansion, two-column review
@@ -393,6 +394,7 @@ export default function OtifExceptions({ canReview = false }) {
   const [reviewing, setReviewing]     = useState(null)
   const [expandedIds, setExpandedIds] = useState(() => new Set())
   const [toast, setToast]             = useState('')
+  const [taskDraft, setTaskDraft]     = useState(null)
   const toastTimer = useRef(null)
 
   const { orgMembership } = useProfileStore()
@@ -468,20 +470,44 @@ export default function OtifExceptions({ canReview = false }) {
     ? 'Nothing matches this search and filter. Clear them to see the full queue.'
     : activeTab === 'pending' ? 'Every exception request has been reviewed.' : 'Approved and rejected requests will appear here.'
 
+  const openTaskFromRow = (row) => {
+    setTaskDraft({
+      title: `OTIF: ${row.poNumber} — ${row.typeLabel}`,
+      description: [row.reasonLine, row.sku ? `SKU: ${row.sku}` : null, row.parties].filter(Boolean).join('\n'),
+      labels: ['OTIF', row.isQty ? 'cancellation' : 'date-change'],
+      linked_po_id: row.ex.po_id || null,
+      po_number: row.poNumber !== '—' ? row.poNumber : null,
+    })
+  }
+
   const renderActionCell = (row) => {
+    const createBtn = (
+      <button type="button" onClick={() => openTaskFromRow(row)}
+        className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer">
+        Create Task
+      </button>
+    )
     if (row.status === 'pending') {
-      return canReview ? (
-        <button type="button" onClick={() => setReviewing(row.ex)}
-          className="px-3.5 py-1.5 rounded-lg bg-[#2F3CBE] text-white text-xs font-semibold hover:bg-[#262BA8] transition-colors cursor-pointer">
-          Review
-        </button>
-      ) : null
+      return (
+        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+          {canReview && (
+            <button type="button" onClick={() => setReviewing(row.ex)}
+              className="px-3.5 py-1.5 rounded-lg bg-[#2F3CBE] text-white text-xs font-semibold hover:bg-[#262BA8] transition-colors cursor-pointer">
+              Review
+            </button>
+          )}
+          {createBtn}
+        </div>
+      )
     }
     return (
-      <button type="button" onClick={() => toggleExpanded(row.ex.id)}
-        className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-800 hover:bg-gray-50 transition-colors cursor-pointer">
-        {expandedIds.has(row.ex.id) ? 'Hide trail' : 'Audit trail'}
-      </button>
+      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+        <button type="button" onClick={() => toggleExpanded(row.ex.id)}
+          className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-800 hover:bg-gray-50 transition-colors cursor-pointer">
+          {expandedIds.has(row.ex.id) ? 'Hide trail' : 'Audit trail'}
+        </button>
+        {createBtn}
+      </div>
     )
   }
 
@@ -712,7 +738,7 @@ export default function OtifExceptions({ canReview = false }) {
                       </div>
                     )}
                   </div>
-                  <div className="[&>button]:w-full">{renderActionCell(row)}</div>
+                  <div className="[&_button]:w-full">{renderActionCell(row)}</div>
                   {row.status !== 'pending' && expandedIds.has(row.ex.id) && <AuditTrail row={row} />}
                 </div>
               ))}
@@ -735,6 +761,14 @@ export default function OtifExceptions({ canReview = false }) {
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
           {toast}
         </div>
+      )}
+
+      {taskDraft && (
+        <NewTaskFromSourceModal
+          source="otif"
+          defaults={taskDraft}
+          onClose={() => setTaskDraft(null)}
+        />
       )}
     </div>
   )

@@ -25,8 +25,11 @@ const SupportSection   = lazy(() => import('./pages/Dashboard/sections/SupportSe
 const SignedAgreementSection = lazy(() => import('./pages/Dashboard/sections/SignedAgreementSection'))
 const IrfSection        = lazy(() => import('./pages/Dashboard/sections/IrfSection'))
 const QcReportsSection  = lazy(() => import('./pages/Dashboard/sections/QcReportsSection'))
-const CatalogsSection  = lazy(() => import('./pages/Dashboard/sections/CatalogsSection'))
-const LogisticsSection = lazy(() => import('./pages/Dashboard/sections/LogisticsSection'))
+const CatalogsSection        = lazy(() => import('./pages/Dashboard/sections/CatalogsSection'))
+const LogisticsSection       = lazy(() => import('./pages/Dashboard/sections/LogisticsSection'))
+const ProjectsSection        = lazy(() => import('./pages/Dashboard/sections/ProjectsSection'))
+const ProjectBoardSection    = lazy(() => import('./pages/Dashboard/sections/ProjectBoardSection'))
+const MyTasksSection         = lazy(() => import('./pages/Dashboard/sections/MyTasksSection'))
 // Pulled out of production — no nav link points here anymore (Sidebar.jsx),
 // and this was the last thing gating it. Re-enable both this import and the
 // "mis" route below for local use whenever it's needed again.
@@ -44,6 +47,7 @@ const MembersPage = lazy(() => import('./pages/Admin/MembersPage'))
 const AnalyticsPage = lazy(() => import('./pages/Admin/AnalyticsPage'))
 const SignatureSettingsPage = lazy(() => import('./pages/Admin/SignatureSettingsPage'))
 const PLMSecurityPage = lazy(() => import('./pages/Admin/PLMSecurityPage'))
+const ProjectsAdminPage = lazy(() => import('./pages/Admin/ProjectsAdminPage'))
 
 import { useAuth } from './hooks/useAuth'
 import { useRecentWorkspaces } from './hooks/useRecentWorkspaces'
@@ -155,6 +159,9 @@ export default function App() {
             <Route path="analytics-v3" element={<AnalyticsV3Section />} /> */}
             <Route path="analytics-demo" element={<AnalyticsDummySection />} />
             <Route path="catalogs"  element={<CatalogsSection />} />
+            <Route path="projects"          element={<ProjectsSection />} />
+            <Route path="projects/my-tasks" element={<MyTasksSection />} />
+            <Route path="projects/:projectId" element={<ProjectBoardSection />} />
           </Route>
           {/* Legacy merchant-dashboard URL */}
           <Route path="/merchant-dashboard" element={<Navigate to="/dashboard" replace />} />
@@ -183,6 +190,7 @@ export default function App() {
           <Route path="/admin/analytics"    element={<RequireAuth><AnalyticsPage /></RequireAuth>} />
           <Route path="/admin/signature"    element={<RequireAuth><SignatureSettingsPage /></RequireAuth>} />
           <Route path="/admin/plm-security" element={<RequireAuth><PLMSecurityPage /></RequireAuth>} />
+          <Route path="/admin/projects"     element={<RequireAuth><ProjectsAdminPage /></RequireAuth>} />
 
           <Route path="*" element={<Navigate to="/auth" replace />} />
         </Routes>

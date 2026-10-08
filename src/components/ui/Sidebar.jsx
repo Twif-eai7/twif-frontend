@@ -1,5 +1,6 @@
 import { Link, useMatch, useResolvedPath, useLocation } from 'react-router-dom'
 import { useState } from 'react'
+import { FolderKanban } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { canAccessJnmPlFeatures } from '../../utils/jnmAccess'
@@ -17,11 +18,13 @@ const ChevronRight = () => (
 )
 
 // NavCategory — navigates to `to`, auto-expands when that route is active
-function NavCategory({ title, icon, to, href, children, collapsed }) {
+function NavCategory({ title, icon, to, href, children, collapsed, prefix }) {
   // hooks must always be called — handle missing `to` gracefully
   const resolved = useResolvedPath(to || '')
+  const location = useLocation()
   const match    = useMatch({ path: resolved.pathname, end: true })
-  const isActive = !!to && !!match
+  const prefixMatch = !!prefix && !!to && (location.pathname === resolved.pathname || location.pathname.startsWith(`${resolved.pathname}/`))
+  const isActive = !!to && (!!match || prefixMatch)
 
   // for external / no-route categories, use local open state
   const [localOpen, setLocalOpen] = useState(false)
@@ -205,6 +208,9 @@ const IconSupport = () => (
     <path d="M12 8H12.01" />
   </svg>
 )
+const IconProjects = () => (
+  <FolderKanban className="w-4 h-4" strokeWidth={1.75} />
+)
 const IconNPD = () => (
   <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
     <circle cx="12" cy="12" r="10"></circle>
@@ -322,6 +328,12 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
           {showDashboard && (
             <NavCategory title="My Dashboard" icon={<IconChart />} to="/dashboard" collapsed={effectiveCollapsed}>
               <NavLink to="/dashboard" onNavigate={closeMobile}>KPI &amp; MIS</NavLink>
+            </NavCategory>
+          )}
+          {showModule('projects') && (
+            <NavCategory title="Projects" icon={<IconProjects />} to="/dashboard/projects" prefix collapsed={effectiveCollapsed}>
+              <NavLink to="/dashboard/projects" onNavigate={closeMobile}>All Projects</NavLink>
+              <NavLink to="/dashboard/projects/my-tasks" onNavigate={closeMobile}>My Tasks</NavLink>
             </NavCategory>
           )}
           {showAnyTab('npd', ['kaptr', 'pd-tracker', 'style-library']) && (

@@ -23,6 +23,7 @@ import { ensureDraft, ensureDraftAndUpdatePatch, updateDraftPatch, setDraftServe
 import { attemptSync, flushPendingPhotos, isSyncPausedForAuth, REPORT_NOT_FOUND } from '../../../lib/offlineSync'
 import { PLAN_OFFLINE_ENABLED } from '../../../lib/planOffline'
 import { sortPhotosInSequence, sortFilesInSequence } from '../../../lib/photoSequence'
+import NewTaskFromSourceModal from '../../pm/project/NewTaskFromSourceModal'
 
 // PLAN OFFLINE (disabled): shown instead of staging a photo/callout locally.
 function offlineOffMessage(action, reportId) {
@@ -1200,7 +1201,7 @@ function useSwipeReveal({ disabled }) {
   return { offset, handlers, close }
 }
 
-function DefectCard({ r, disabled, edit, commit, remove, reportId, photos, onPhotosChanged, draftId, pendingPhotos, onPendingChanged }) {
+function DefectCard({ r, disabled, edit, commit, remove, reportId, photos, onPhotosChanged, draftId, pendingPhotos, onPendingChanged, onRaiseTask }) {
   const { offset, handlers, close } = useSwipeReveal({ disabled })
   return (
     <div className="relative overflow-hidden rounded-lg">
@@ -1239,15 +1240,23 @@ function DefectCard({ r, disabled, edit, commit, remove, reportId, photos, onPho
           onChange={e => edit(r.id, 'remarks', e.target.value)}
           onBlur={e => commit(r.id, 'remarks', e.target.value)}
           className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-md disabled:bg-gray-50" />
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <RowPhotoCell reportId={reportId} stepKey={`defects:${r.id}`} photos={photos} disabled={disabled} onChanged={onPhotosChanged} draftId={draftId} pendingPhotos={pendingPhotos} onPendingChanged={onPendingChanged} />
-          {!disabled && (
-            <button type="button" onClick={() => remove(r.id)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-              Delete
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {onRaiseTask && (
+              <button type="button" onClick={() => onRaiseTask(r)}
+                className="inline-flex items-center px-2 py-1.5 rounded-md text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50">
+                Raise Task
+              </button>
+            )}
+            {!disabled && (
+              <button type="button" onClick={() => remove(r.id)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                Delete
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -1255,7 +1264,7 @@ function DefectCard({ r, disabled, edit, commit, remove, reportId, photos, onPho
 }
 
 // ── Step 7 — Workmanship / Defects ───────────────────────────────────────────
-function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosChanged, draftId, pendingPhotos, onPendingChanged }) {
+function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosChanged, draftId, pendingPhotos, onPendingChanged, onRaiseTask }) {
   const [rows, setRows] = useState(defects || [])
   useEffect(() => setRows(defects || []), [defects])
 
@@ -1299,6 +1308,7 @@ function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosC
             draftId={draftId}
             pendingPhotos={pendingPhotos}
             onPendingChanged={onPendingChanged}
+            onRaiseTask={onRaiseTask}
           />
         ))}
         {rows.length > 0 && (
@@ -1318,6 +1328,7 @@ function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosC
               <th className="px-2 py-2 font-bold w-16">Minor</th>
               <th className="text-left px-3 py-2 font-bold">Remarks</th>
               <th className="w-12" />
+              {onRaiseTask && <th className="w-20" />}
               {!disabled && <th className="w-8" />}
             </tr>
           </thead>
@@ -1347,6 +1358,13 @@ function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosC
                 <td className="px-2 py-1.5">
                   <RowPhotoCell reportId={reportId} stepKey={`defects:${r.id}`} photos={photos} disabled={disabled} onChanged={onPhotosChanged} draftId={draftId} pendingPhotos={pendingPhotos} onPendingChanged={onPendingChanged} />
                 </td>
+                {onRaiseTask && (
+                  <td className="px-2 py-1.5 text-center">
+                    <button type="button" onClick={() => onRaiseTask(r)} className="text-[10px] font-semibold text-indigo-600 hover:underline">
+                      Raise Task
+                    </button>
+                  </td>
+                )}
                 {!disabled && (
                   <td className="px-2 py-1.5 text-center">
                     <button type="button" onClick={() => remove(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
@@ -1357,7 +1375,7 @@ function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosC
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={disabled ? 6 : 7} className="px-3 py-4 text-center text-gray-400 text-xs">No defects recorded</td></tr>
+              <tr><td colSpan={(disabled ? 6 : 7) + (onRaiseTask ? 1 : 0)} className="px-3 py-4 text-center text-gray-400 text-xs">No defects recorded</td></tr>
             )}
           </tbody>
           <tfoot>
@@ -1366,7 +1384,7 @@ function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosC
               <td className="px-2 py-2 text-center">{totals.critical}</td>
               <td className="px-2 py-2 text-center">{totals.major}</td>
               <td className="px-2 py-2 text-center">{totals.minor}</td>
-              <td colSpan={disabled ? 2 : 3}></td>
+              <td colSpan={(disabled ? 2 : 3) + (onRaiseTask ? 1 : 0)}></td>
             </tr>
           </tfoot>
         </table>
@@ -1388,7 +1406,7 @@ function DefectTable({ reportId, defects, disabled, onChanged, photos, onPhotosC
 // entry, and only when no PO-level plan is set for this SKU's lot size.
 // AQL Critical/Major/Minor are a fixed org policy (0 / 2.5 / 4.0) and are
 // always locked, independent of whether a sampling plan resolves.
-function WorkmanshipStep({ value, onChange, disabled, reportId, defects, onChanged, plan, aqlVerdict, photos, onPhotosChanged, draftId, pendingPhotos, onPendingChanged }) {
+function WorkmanshipStep({ value, onChange, disabled, reportId, defects, onChanged, plan, aqlVerdict, photos, onPhotosChanged, draftId, pendingPhotos, onPendingChanged, onRaiseTask }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1432,7 +1450,14 @@ function WorkmanshipStep({ value, onChange, disabled, reportId, defects, onChang
       )}
       <Field label="QC Observation"><RichTextArea value={value.workmanship_remarks} onChange={v => onChange({ ...value, workmanship_remarks: v })} disabled={disabled} /></Field>
       <div>
-        <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Defects</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Defects</div>
+          {onRaiseTask && (
+            <button type="button" onClick={() => onRaiseTask(null)} className="text-[11px] font-semibold text-indigo-600 hover:underline">
+              Raise Task
+            </button>
+          )}
+        </div>
         {plan && (
           <div className="mb-2 text-[11px] text-gray-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 leading-relaxed">
             <span className="font-semibold text-gray-700">AQL allowance</span> for {Number(plan.sampleSize).toLocaleString()} inspected units:
@@ -1440,7 +1465,7 @@ function WorkmanshipStep({ value, onChange, disabled, reportId, defects, onChang
           </div>
         )}
         {reportId ? (
-          <DefectTable reportId={reportId} defects={defects} disabled={disabled} onChanged={onChanged} photos={photos} onPhotosChanged={onPhotosChanged}
+          <DefectTable reportId={reportId} defects={defects} disabled={disabled} onChanged={onChanged} photos={photos} onPhotosChanged={onPhotosChanged} onRaiseTask={onRaiseTask}
             draftId={draftId} pendingPhotos={pendingPhotos} onPendingChanged={onPendingChanged} />
         ) : (
           <p className="text-xs text-gray-400">Save the inspection first to enable defect tracking.</p>
@@ -2211,6 +2236,7 @@ function SubmitConfirmModal({ poNumber, skuRef, stageLabel, round, result, prior
 // ── Main wizard ────────────────────────────────────────────────────────────────
 export default function InspectionForm({ lineItem, reportId: initialReportId, inspectionType, initialStep, onStepChange, locked, userName, memberId, canManage, onClose, stepNavContainer, closeWizardToken, stageSwitchToken, onStageFlushed, poInspectionLevel, reports, scheduleByStage, po, onSwitchStage, refresh }) {
   const [localId, setLocalId] = useState(initialReportId)
+  const [taskDraft, setTaskDraft] = useState(null)
   // Self-heals if this SKU/stage's report already exists in `reports`
   // (fetched PO-wide by the parent) but wasn't known yet when this wizard
   // opened — e.g. a refresh landing here before that fetch had resolved.
@@ -4226,7 +4252,25 @@ export default function InspectionForm({ lineItem, reportId: initialReportId, in
                 <WorkmanshipStep value={workmanshipView} onChange={setWorkmanship} disabled={disabled}
                   reportId={localId} defects={report?.inspection_report_defects} onChanged={refreshReport} plan={aqlPlan} aqlVerdict={aqlVerdict}
                   photos={report?.inspection_report_photos} onPhotosChanged={refreshReport}
-                  draftId={draftId} pendingPhotos={pendingPhotos} onPendingChanged={refreshPendingPhotos} />
+                  draftId={draftId} pendingPhotos={pendingPhotos} onPendingChanged={refreshPendingPhotos}
+                  onRaiseTask={(defect) => setTaskDraft({
+                    title: defect?.defect_description
+                      ? `QC defect: ${defect.defect_description}`
+                      : `Inspection task — ${po?.po_number || 'PO'} ${inspectionType || ''}`.trim(),
+                    description: [
+                      defect ? `Defect: ${defect.defect_description || '—'}` : null,
+                      defect ? `Critical ${defect.critical_count || 0} · Major ${defect.major_count || 0} · Minor ${defect.minor_count || 0}` : null,
+                      defect?.remarks ? `Remarks: ${defect.remarks}` : null,
+                      po?.po_number ? `PO: ${po.po_number}` : null,
+                      lineItem?.buyer_sku_ref ? `SKU: ${lineItem.buyer_sku_ref}` : null,
+                      inspectionType ? `Stage: ${inspectionType}` : null,
+                    ].filter(Boolean).join('\n'),
+                    labels: ['QC', inspectionType || 'inspection'],
+                    linked_po_id: po?.id || null,
+                    linked_inspection_id: localId || null,
+                    po_number: po?.po_number || null,
+                  })}
+                />
               </SectionBlock>
 
               <SectionBlock index={8} label={STEPS[7].label} id="step-section-digitals" onHover={setHoveredStepIndex} onActivate={activateStep}
@@ -4316,6 +4360,13 @@ export default function InspectionForm({ lineItem, reportId: initialReportId, in
           defaultQuantity={leftoverPrompt.leftoverQty ?? leftoverPrompt.followUpQty}
           onClose={() => { setShowLeftoverCancelModal(false); setLeftoverPrompt(null) }}
           onSubmitted={finishAfterLeftoverCancelled}
+        />
+      )}
+      {taskDraft && (
+        <NewTaskFromSourceModal
+          source="inspection"
+          defaults={taskDraft}
+          onClose={() => setTaskDraft(null)}
         />
       )}
     </div>

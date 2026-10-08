@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { usePctBetaStore } from '../state/usePctBetaStore'
 import {
   STAGE_CARDS,
@@ -12,6 +12,7 @@ import {
   skuDetailForRow,
 } from '../utils'
 import { IconCheck, IconWarn, IconLock, IconFile } from '../icons'
+import NewTaskFromSourceModal from '../../pm/project/NewTaskFromSourceModal'
 
 function RiskBadge({ risk }) {
   const tone = risk === 'High' ? 'bg-red-100 text-red-700' : risk === 'Medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
@@ -213,6 +214,7 @@ export default function WorkflowScreen() {
   const setTriggerOpenState = usePctBetaStore((s) => s.setTriggerOpenState)
 
   const inlineFileInput = useRef(null)
+  const [taskDraft, setTaskDraft] = useState(null)
 
   const p = selectedPO
   const poSkuRows = useMemo(() => {
@@ -241,6 +243,7 @@ export default function WorkflowScreen() {
   }
 
   return (
+    <>
     <div className="px-7 py-6 max-w-full overflow-x-hidden flex-1 min-h-0 overflow-y-auto animate-[fadeUp_.35s_ease]">
       <div className="mb-6 flex justify-between items-start gap-3 flex-wrap">
         <div>
@@ -430,17 +433,43 @@ export default function WorkflowScreen() {
                 Last update: {current.timestamp}{!isCompleted && unlocked && !stageCanProceed ? ' · Complete mandatory + hard stops to proceed' : ''}<br />
                 Mandatory {mandatoryDone}/{checks.length} · Hard Stops {hardStopDone}/{hardStopTotal}
               </div>
-              <button
-                className={`border border-slate-200 bg-white rounded-lg px-3 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-55 disabled:cursor-not-allowed ${isCompleted ? '!bg-emerald-100 !border-emerald-100 !text-emerald-700 !opacity-100' : ''}`}
-                disabled={!unlocked || isCompleted || !stageCanProceed}
-                onClick={(e) => { e.stopPropagation(); advanceStage(s.id) }}
-              >
-                {!unlocked ? 'Locked by Previous Stage' : isCompleted ? 'Completed' : !stageCanProceed ? 'Complete Checks First' : isLast ? 'Complete final stage' : 'Proceed to Next Stage'}
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  className="border border-indigo-200 bg-indigo-50 rounded-lg px-3 py-2 text-[12.5px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setTaskDraft({
+                      title: `${s.title} — ${p?.po || 'PO'}`,
+                      description: [`PCT stage: ${s.title}`, p?.po ? `PO: ${p.po}` : null, p?.sku ? `SKU: ${p.sku}` : null, p?.vendor ? `Vendor: ${p.vendor}` : null].filter(Boolean).join('\n'),
+                      labels: ['PCT', s.id],
+                      linked_pct_stage: s.id,
+                      po_number: p?.po || null,
+                    })
+                  }}
+                >
+                  Create Task
+                </button>
+                <button
+                  className={`border border-slate-200 bg-white rounded-lg px-3 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-55 disabled:cursor-not-allowed ${isCompleted ? '!bg-emerald-100 !border-emerald-100 !text-emerald-700 !opacity-100' : ''}`}
+                  disabled={!unlocked || isCompleted || !stageCanProceed}
+                  onClick={(e) => { e.stopPropagation(); advanceStage(s.id) }}
+                >
+                  {!unlocked ? 'Locked by Previous Stage' : isCompleted ? 'Completed' : !stageCanProceed ? 'Complete Checks First' : isLast ? 'Complete final stage' : 'Proceed to Next Stage'}
+                </button>
+              </div>
             </div>
           </div>
         )
       })}
     </div>
+    {taskDraft && (
+      <NewTaskFromSourceModal
+        source="pct"
+        defaults={taskDraft}
+        onClose={() => setTaskDraft(null)}
+      />
+    )}
+    </>
   )
 }

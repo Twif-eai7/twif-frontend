@@ -79,6 +79,14 @@ export const MODULES = [
     ],
   },
   {
+    key: 'projects',
+    label: 'Projects',
+    tabs: [
+      { key: 'board', label: 'Project Board' },
+      { key: 'my-tasks', label: 'My Tasks' },
+    ],
+  },
+  {
     key: 'tools',
     label: 'Travel',
     tabs: [

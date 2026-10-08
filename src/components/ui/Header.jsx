@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useIsAdmin, useRole } from '../../stores/profileStore'
 import { useAlertsTrigger } from '../../hooks/useAlerts'
 import AlertsDrawer from './AlertsDrawer'
+import PmNotificationBell from '../pm/shared/PmNotificationBell'
 
 export default function Header({ dept, profile, onLogout }) {
   const isAdmin = useIsAdmin()
@@ -87,6 +88,7 @@ export default function Header({ dept, profile, onLogout }) {
                 )}
               </button>
               <AlertsDrawer />
+              <PmNotificationBell />
             </>
           )}
 
@@ -130,6 +132,7 @@ export default function Header({ dept, profile, onLogout }) {
                   )}
                 </button>
                 <AlertsDrawer />
+                <PmNotificationBell />
               </>
             )}
           </div>

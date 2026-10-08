@@ -56,6 +56,16 @@ const NAV = [
     ),
   },
   {
+    to: '/admin/projects',
+    label: 'Projects',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="2.75" y="3.25" width="10.5" height="9.5" rx="1.5" stroke="currentColor" strokeWidth="1.25" />
+        <path d="M2.75 6.25h10.5M6.25 3.25v3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     to: '/admin/plm-security',
     label: 'Accessibility and Roles',
     icon: (
