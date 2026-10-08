@@ -23,6 +23,7 @@ import { usePendingLineItemCancellations } from '../../hooks/usePoLineItemCancel
 import DeletePoModal          from './DeletePoModal'
 import RevisePOModal          from './RevisePOModal'
 import OtifExceptionModal     from './OtifExceptionModal'
+import QualityClaimModal      from './QualityClaimModal'
 import PoInstructionsModal    from './PoInstructionsModal'
 import PlanShipmentModal      from './PlanShipmentModal'
 import MyShipmentPlansDrawer  from './MyShipmentPlansDrawer'
@@ -98,13 +99,13 @@ function SkeletonRows({ cols }) {
 }
 
 // Three-dots action menu for a single row
-function KebabMenu({ poId, isConfirmed, isErpSynced, canUpload, canSyncERP, canExplainDelay, canDelete, canReportOtif, canUploadProductSheet, hasProductSheet, canSubmitAdvancePayment, canCancelOrder,
-  onUpload, onUpdatePo, onRevise, onErpSync, onPiDelay, onDelete, onReportOtif, onUploadProductSheet, onSubmitAdvancePayment, onCancelOrder, actionLoading, open, onOpen, onClose }) {
+function KebabMenu({ poId, isConfirmed, isErpSynced, canUpload, canSyncERP, canExplainDelay, canDelete, canReportOtif, canSubmitQualityClaim, canUploadProductSheet, hasProductSheet, canSubmitAdvancePayment, canCancelOrder,
+  onUpload, onUpdatePo, onRevise, onErpSync, onPiDelay, onDelete, onReportOtif, onSubmitQualityClaim, onUploadProductSheet, onSubmitAdvancePayment, onCancelOrder, actionLoading, open, onOpen, onClose }) {
 
   const buttonRef = useRef(null)
   const [menuStyle, setMenuStyle] = useState({})
 
-  const hasItems = canUpload || (canSyncERP && !isErpSynced) || (canExplainDelay && !isConfirmed) || (canDelete && !isConfirmed) || (canReportOtif && isConfirmed) || canUploadProductSheet || canSubmitAdvancePayment || canCancelOrder
+  const hasItems = canUpload || (canSyncERP && !isErpSynced) || (canExplainDelay && !isConfirmed) || (canDelete && !isConfirmed) || (canReportOtif && isConfirmed) || (canSubmitQualityClaim && isConfirmed) || canUploadProductSheet || canSubmitAdvancePayment || canCancelOrder
   if (!hasItems) return null
 
   const handleOpen = () => {
@@ -218,6 +219,16 @@ function KebabMenu({ poId, isConfirmed, isErpSynced, canUpload, canSyncERP, canE
         </button>
       )}
 
+      {canSubmitQualityClaim && isConfirmed && (
+        <button type="button" onClick={() => { onSubmitQualityClaim(); onClose() }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors cursor-pointer">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          Submit Quality Claim
+        </button>
+      )}
+
       {canSyncERP && !isErpSynced && (
         <button type="button" disabled={actionLoading[`${poId}-erp`]}
           onClick={() => { onErpSync(poId); onClose() }}
@@ -299,6 +310,7 @@ export default function PoRecord() {
   const canUpload       = isMerch || isTech || isErp
   const canSyncERP      = isErp   || isTech
   const canReportOtif   = isMerch || isTech
+  const canSubmitQualityClaim = isMerch || isTech
   // Merchandising + tech specifically (not the broader isTech, which also
   // covers 'it') — so they can attach the product details sheet later if it
   // wasn't provided during the original PI upload.
@@ -307,7 +319,7 @@ export default function PoRecord() {
   // this later (by dept / role) if planning needs to be limited to a
   // specific team.
   const canPlanShipment = role === 'Merchant'
-  const hasAnyAction    = canUpload || canSyncERP || canReportOtif
+  const hasAnyAction    = canUpload || canSyncERP || canReportOtif || canSubmitQualityClaim
 
   // Column visibility
   const showCheckbox    = isErp || canPlanShipment
@@ -344,7 +356,7 @@ export default function PoRecord() {
 
   const fetchPOs                                      = useFetchPOs()
   const { fetchMerchants, fetchDropdowns }            = usePODropdowns()
-  const { markErpSynced, bulkMarkErpSynced, addPiDelayComment, deletePO, reportOtifException, uploadProductDetails, submitAdvancePayment } = usePOActions()
+  const { markErpSynced, bulkMarkErpSynced, addPiDelayComment, deletePO, reportOtifException, uploadProductDetails, submitAdvancePayment, submitQualityClaim } = usePOActions()
   const { pendingIds: pendingOtifIds, fetchPendingOtifIds } = usePendingOtifIds()
   const { pendingPoIds: plannedPoIds, fetchPendingShipmentPlanIds } = usePendingShipmentPlanIds()
 
@@ -390,6 +402,7 @@ export default function PoRecord() {
   const [deleteModalPo, setDeleteModalPo] = useState(null)
   const [reviseModalPo, setReviseModalPo]         = useState(null)
   const [otifExceptionPo, setOtifExceptionPo]     = useState(null)
+  const [qualityClaimPo, setQualityClaimPo]       = useState(null)
   const [instructionsOpen, setInstructionsOpen]   = useState(false)
   const [planModalOpen, setPlanModalOpen]         = useState(false)
   const [myPlansOpen, setMyPlansOpen]             = useState(false)
@@ -615,6 +628,7 @@ export default function PoRecord() {
               canExplainDelay={isMerch}
               canDelete={canUpload}
               canReportOtif={canReportOtif && !pendingOtifIds.has(po.id)}
+              canSubmitQualityClaim={canSubmitQualityClaim}
               canUploadProductSheet={canUploadProductSheet}
               hasProductSheet={!!po.product_details_file_url}
               canSubmitAdvancePayment={isMerch || isTech || isErp}
@@ -625,6 +639,7 @@ export default function PoRecord() {
               onPiDelay={() => setPiDelayPo(po)}
               onDelete={() => setDeleteModalPo(po)}
               onReportOtif={() => setOtifExceptionPo(po)}
+              onSubmitQualityClaim={() => setQualityClaimPo(po)}
               onUploadProductSheet={() => setProductSheetPo(po)}
               onSubmitAdvancePayment={() => setAdvancePaymentPo(po)}
               onCancelOrder={() => openCancelOrder(po)}
@@ -683,6 +698,7 @@ export default function PoRecord() {
               canExplainDelay={isMerch}
               canDelete={canUpload}
               canReportOtif={canReportOtif && !pendingOtifIds.has(po.id)}
+              canSubmitQualityClaim={canSubmitQualityClaim}
               canUploadProductSheet={canUploadProductSheet}
               hasProductSheet={!!po.product_details_file_url}
               canSubmitAdvancePayment={isMerch || isTech || isErp}
@@ -693,6 +709,7 @@ export default function PoRecord() {
               onPiDelay={() => setPiDelayPo(po)}
               onDelete={() => setDeleteModalPo(po)}
               onReportOtif={() => setOtifExceptionPo(po)}
+              onSubmitQualityClaim={() => setQualityClaimPo(po)}
               onUploadProductSheet={() => setProductSheetPo(po)}
               onSubmitAdvancePayment={() => setAdvancePaymentPo(po)}
               onCancelOrder={() => openCancelOrder(po)}
@@ -1078,6 +1095,16 @@ export default function PoRecord() {
         po={reviseModalPo}
         onClose={() => setReviseModalPo(null)}
         onSuccess={reload}
+      />
+
+      {/* Quality Claim modal — confirmed POs, merch/tech only */}
+      <QualityClaimModal
+        key={qualityClaimPo?.id}
+        po={qualityClaimPo}
+        onClose={() => setQualityClaimPo(null)}
+        onSubmit={({ claimType, lineItemId, description, proofImage, status, resolutionNote }) =>
+          submitQualityClaim(qualityClaimPo.id, { claimType, lineItemId, description, proofImage, status, resolutionNote })
+        }
       />
 
       {/* OTIF Exception modal — confirmed POs, merch only */}

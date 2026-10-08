@@ -10,6 +10,8 @@ import OpenPoSummary from '../../../components/orderManagement/OpenPoSummary'
 import ShippedPoSummary from '../../../components/orderManagement/ShippedPoSummary'
 import PoTracker from '../../../components/orderManagement/PoTracker'
 import OtifExceptions from '../../../components/orderManagement/OtifExceptions'
+import QualityClaims from '../../../components/orderManagement/QualityClaims'
+import ShipmentContainersTab from '../../../components/logistics/ShipmentContainers/ShipmentContainersTab'
 
 const DEFAULT_TAB = {
   Merchant: 'po-table',
@@ -19,6 +21,7 @@ const DEFAULT_TAB = {
 function TabContent({ tab, month, buyer, year, timing, vendors, canReviewExceptions }) {
   const navigate = useNavigate()
   if (tab === 'otif-exceptions')    return <OtifExceptions canReview={canReviewExceptions} />
+  if (tab === 'quality-claims')     return <QualityClaims />
   if (tab === 'po-table')           return <PoRecord />
   if (tab === 'po-file-records')    return <POFileRecords />
   if (tab === 'pct-beta')           return <ComingSoon title="Production Control Tower" message="PCT has moved to /pct-beta" />
@@ -43,6 +46,7 @@ function TabContent({ tab, month, buyer, year, timing, vendors, canReviewExcepti
     />
   )
   if (tab === 'recent-po') return <PoTracker />
+  if (tab === 'shipment-containers') return <ShipmentContainersTab />
   if (tab)  return <ComingSoon />
   return null
 }
@@ -84,7 +88,7 @@ export default function OrdersSection() {
 
   if (role === 'Merchant') {
     return (
-      <div className="relative">
+      <div className="relative h-full">
         {isPending && (
           <div className="absolute inset-x-0 top-0 h-0.5 bg-blue-500 animate-pulse z-50" />
         )}

@@ -5,6 +5,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useJnmPlAccess } from "../../hooks/useJnmPlAccess";
 import { usePersistedPlFilter } from "../../hooks/usePersistedPlFilter";
 import { useMerchantPoBuyersAccess, buildPoSummaryParams } from "../../hooks/useMerchantPoBuyersAccess";
+import { useMerchantSwitcher } from "../../hooks/useMerchantSwitcher";
 import ExportExcelButton from "../ui/ExportExcelButton";
 import ExportPdfButton from "../ui/ExportPdfButton";
 import PrintButton from "../ui/PrintButton";
@@ -183,8 +184,8 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
   const [plMode, setPlMode] = usePersistedPlFilter("expenses-summary", "plMode", "jng");
   const [misView, setMisView] = usePersistedPlFilter("expenses-summary", "misView", "summary");
   const months = useMemo(() => fyMonthRows(year), [year]);
-  const [rows, setRows] = useState([]);
-  const [openRows, setOpenRows] = useState([]);
+  const [rawRows, setRawRows] = useState([]);
+  const [rawOpenRows, setRawOpenRows] = useState([]);
   const [commissionMap, setCommissionMap] = useState({});
   const [rateMap, setRateMap] = useState({});
   const [buyerRateMap, setBuyerRateMap] = useState({});
@@ -196,6 +197,9 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
   const [showInr, setShowInr] = usePersistedPlFilter("expenses-summary", "showInr", false);
   const [inrRate, setInrRate] = usePersistedPlFilter("expenses-summary", "inrRate", 83);
   const buyersAccess = useMerchantPoBuyersAccess();
+  const { merchantList, selectedMerchant, setSelectedMerchant, merchantMatchesRow } = useMerchantSwitcher(buyersAccess);
+  const [buyer, setBuyer] = usePersistedPlFilter("expenses-summary", "buyer", "");
+  const [vendor, setVendor] = usePersistedPlFilter("expenses-summary", "vendor", "");
 
   const fmtCurrency = useCallback((n) => {
     if (n == null || n === "" || isNaN(n)) return "";
@@ -216,8 +220,8 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
     setError(null);
 
     if (!buyersAccess.isUnrestricted && buyersAccess.buyersParam === "") {
-      setRows([]);
-      setOpenRows([]);
+      setRawRows([]);
+      setRawOpenRows([]);
       setLoading(false);
       return () => { cancelled = true; };
     }
@@ -234,8 +238,8 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
       if (!shipJson.success) throw new Error(shipJson.error || "Failed to load shipped POs");
       if (!openJson.success) throw new Error(openJson.error || "Failed to load open POs");
       if (!cancelled) {
-        setRows(shipJson.data?.rows ?? []);
-        setOpenRows(openJson.data?.rows ?? []);
+        setRawRows(shipJson.data?.rows ?? []);
+        setRawOpenRows(openJson.data?.rows ?? []);
       }
     };
 
@@ -243,6 +247,27 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [year, hasJnmPlAccess, buyersAccess.ready, buyersAccess.isUnrestricted, buyersAccess.buyersParam]);
+
+  const buyerList = useMemo(
+    () => [...new Set([...rawRows, ...rawOpenRows].map((r) => r.customer).filter(Boolean))].sort(),
+    [rawRows, rawOpenRows]
+  );
+  const vendorList = useMemo(
+    () => [...new Set([...rawRows, ...rawOpenRows].map((r) => r.vendor).filter(Boolean))].sort(),
+    [rawRows, rawOpenRows]
+  );
+  const merchantOptions = useMemo(
+    () => merchantList.map((m) => m.full_name || m.email).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    [merchantList]
+  );
+  const filterFn = useCallback((r) => {
+    if (buyer && (r.customer || "").trim() !== buyer) return false;
+    if (vendor && (r.vendor || "").trim() !== vendor) return false;
+    if (merchantMatchesRow && !merchantMatchesRow(r)) return false;
+    return true;
+  }, [buyer, vendor, merchantMatchesRow]);
+  const rows = useMemo(() => rawRows.filter(filterFn), [rawRows, filterFn]);
+  const openRows = useMemo(() => rawOpenRows.filter(filterFn), [rawOpenRows, filterFn]);
 
   useEffect(() => {
     if (!rows.length && !openRows.length) return;
@@ -715,6 +740,21 @@ export default function ExpensesSummary({ availableYears = ["26", "27"], default
             </div>
           </div>
           <div className="flex items-center gap-2 no-print flex-wrap justify-end">
+            <select value={buyer} onChange={(e) => setBuyer(e.target.value)}
+              className="h-8 px-2.5 text-xs font-medium border border-gray-300 rounded-lg bg-white text-black cursor-pointer">
+              <option value="">All Customers</option>
+              {buyerList.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select value={vendor} onChange={(e) => setVendor(e.target.value)}
+              className="h-8 px-2.5 text-xs font-medium border border-gray-300 rounded-lg bg-white text-black cursor-pointer">
+              <option value="">All Vendors</option>
+              {vendorList.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select value={selectedMerchant} onChange={(e) => setSelectedMerchant(e.target.value)}
+              className="h-8 px-2.5 text-xs font-medium border border-gray-300 rounded-lg bg-white text-black cursor-pointer">
+              <option value="">All Merchants</option>
+              {merchantOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
             <MisViewToggle value={misView} onChange={setMisView} />
             <PlModeToggle value={plMode} onChange={setPlMode} />
             <div className="inline-flex items-center rounded-lg border border-gray-300 overflow-hidden shrink-0">

@@ -22,11 +22,13 @@ export const MODULES = [
     tabs: [
       { key: 'po-table',                    label: 'Daily PO and PI records' },
       { key: 'otif-exceptions',             label: 'Exception Requests' },
+      { key: 'quality-claims',              label: 'Quality Claims' },
       { key: 'po-file-records',             label: 'PO File Records' },
       { key: 'pct',                         label: 'PCT' },
       { key: 'recent-po',                   label: 'PO Tracker' },
       { key: 'open-po-summary',             label: 'Open PO Summary' },
       { key: 'shipped-po-summary',          label: 'Shipped PO Summary' },
+      { key: 'shipment-containers',         label: 'Shipment & Planning' },
     ],
   },
   {
@@ -122,6 +124,10 @@ const DEPT_MODULE_KEYS = {
   tech:          ['dashboard', 'tools', 'issues', 'quality'],
 }
 
+// tech is the team building this app, so allowed_modules is moot for them
+// anyway — useAllowedModules() (profileStore.js) bypasses it entirely for
+// dept === 'tech', same as it already does for owners. This default only
+// matters if that bypass is ever narrowed later.
 /** Returns the object-format allowed_modules for a department, e.g. { orders: null, quality: null } */
 export function defaultModulesForDept(department) {
   const keys = DEPT_MODULE_KEYS[department] || MODULES.map(m => m.key)

@@ -6,6 +6,7 @@ import { fetchLiveRates, FALLBACK_RATES, usdToInr, inrToUsd, formatChehomaCommis
 import { useJnmPlAccess, useCanSeeMonthlyExpenseHeader } from "../../hooks/useJnmPlAccess";
 import { usePersistedPlFilter } from "../../hooks/usePersistedPlFilter";
 import { useMerchantPoBuyersAccess, buildPoSummaryParams } from "../../hooks/useMerchantPoBuyersAccess";
+import { useMerchantSwitcher } from "../../hooks/useMerchantSwitcher";
 import { downloadPlScheduleExcel, downloadPlMonthlyExpenseExcel, buildMisMonthlyEntries, formatPlExportDate } from "../../utils/plScheduleExport";
 import { computeMonthPlSummary, computeOverallPoComm, computeSinglePoComm, sumOverallComm, sumSingleComm, poOrderVal, poShippedVal, poProjShippedVal, sumPeriodShippedValue, sumShippedValueForPeriodKey, sumShippedValueForWeekKey, plExpenseKey, plExpenseStorageKey, plExpenseMonthFromStorageKey, plExpenseModeFromStorageKey } from "../../utils/plDataHelpers";
 import PrintButton from "../ui/PrintButton";
@@ -769,6 +770,7 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
   const didScrollInit = useRef(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const buyersAccess = useMerchantPoBuyersAccess();
+  const { merchantList, selectedMerchant, setSelectedMerchant, merchantMatchesRow } = useMerchantSwitcher(buyersAccess);
 
   useEffect(() => {
     if (!hasJnmPlAccess && (plMode === "jnm" || plMode === "overall")) setPlMode("jng");
@@ -1017,8 +1019,9 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
   const filterFn = useCallback((r) => {
     if (buyer  && (r.customer || "").trim() !== buyer)  return false;
     if (vendor && (r.vendor   || "").trim() !== vendor) return false;
+    if (merchantMatchesRow && !merchantMatchesRow(r)) return false;
     return true;
-  }, [buyer, vendor]);
+  }, [buyer, vendor, merchantMatchesRow]);
 
   const inDateRange = useCallback((dateStr) => {
     if (!dateFrom && !dateTo) return true;
@@ -1393,6 +1396,12 @@ export default function WeeklyPoSchedule({ availableYears = ["26", "27"], defaul
           <div className="hidden lg:block w-px h-5 bg-gray-200 mx-0.5 shrink-0" />
           <Dropdown placeholder="All Buyers"  options={buyerList}  value={buyer}  onChange={setBuyer}  />
           <Dropdown placeholder="All Vendors" options={vendorList} value={vendor} onChange={setVendor} />
+          <Dropdown
+            placeholder="All Merchants"
+            options={merchantList.map((m) => m.full_name || m.email).sort((a, b) => a.localeCompare(b))}
+            value={selectedMerchant}
+            onChange={setSelectedMerchant}
+          />
           <div className="hidden lg:block w-px h-5 bg-gray-200 mx-0.5 shrink-0" />
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
             className="h-8 w-full sm:w-auto px-2.5 text-xs font-medium border border-gray-300 rounded-lg bg-white text-black cursor-pointer hover:border-gray-400 transition-colors">

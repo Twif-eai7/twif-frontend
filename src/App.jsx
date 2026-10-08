@@ -51,7 +51,7 @@ const ProjectsAdminPage = lazy(() => import('./pages/Admin/ProjectsAdminPage'))
 
 import { useAuth } from './hooks/useAuth'
 import { useRecentWorkspaces } from './hooks/useRecentWorkspaces'
-import { isOrgLive, useProfileStore } from './stores/profileStore'
+import { useProfileStore } from './stores/profileStore'
 import { Spinner } from './components/ui'
 import { unlockAudioForNotifications } from './utils/callSound'
 
@@ -81,13 +81,13 @@ function RequireAuth({ children }) {
 
   if (!session) return <Navigate to="/auth" replace />
 
-  if (profileFetched && !isOrgLive(orgMembership)) {
+  if (profileFetched && !orgMembership) {
     // No portal_users row or onboarding form not yet submitted
     if (!portalUser || !portalUser.onboarding_completed) {
       return <Navigate to="/onboarding" state={{ email: user?.email }} replace />
     }
 
-    // Form submitted but org is still pending review (or no membership yet)
+    // Form submitted, but this account is not in an organisation yet
     return <Navigate to="/onboarding" state={{ email: user?.email, pendingReview: true }} replace />
   }
 

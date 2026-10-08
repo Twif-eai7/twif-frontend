@@ -6,7 +6,7 @@ import { OTPInput, Alert, Spinner } from '../../components/ui'
 import { useOTPTimer } from '../../hooks/useOtpTimer'
 import { usePortalUser } from '../../hooks/usePortalUser'
 import { verifyEmailOtp, OTP_LENGTH } from '../../lib/authOtp'
-import { attachMembershipByEmail, homePathForMembership, isOrgLive } from '../../stores/profileStore'
+import { attachMembershipByEmail, homePathForMembership } from '../../stores/profileStore'
 
 export default function OTPPage({ forcedRole: routeForcedRole }) {
   const navigate = useNavigate()
@@ -39,9 +39,8 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
       const existing = await attachMembershipByEmail()
       if (cancelled) return
 
-      // Already in an organisation — don't drop them into vendor registration
-      // just because this login started from the vendor entrance or signup.
-      if (isOrgLive(existing)) {
+      // Any organisation membership skips registration, whatever the org status.
+      if (existing) {
         navigate(returnUrl || homePathForMembership(existing), { replace: true })
         return
       }
@@ -60,15 +59,14 @@ export default function OTPPage({ forcedRole: routeForcedRole }) {
       if (!supabase) return
       const { data } = await supabase
         .from('organization_members')
-        .select('role, organizations!inner(type, status)')
+        .select('role, organizations!inner(type)')
         .eq('user_id', verifiedUser.id)
         .maybeSingle()
 
       const orgType = data?.organizations?.type
-      const orgStatus = data?.organizations?.status
       const role    = data?.role
 
-      if (orgStatus === 'pending' || orgStatus === 'rejected' || orgStatus === 'suspended') {
+      if (!data) {
         const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
         navigate(onboardingPath, { state: { email, pendingReview: true, forcedRole }, replace: true })
         return

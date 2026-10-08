@@ -343,11 +343,13 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
               {showTab('npd', 'style-library') && canSeeStyleLibrary && <NavLink to="/dashboard/npd?tab=style-library" onNavigate={closeMobile}>Item Master</NavLink>}
             </NavCategory>
           )}
-          {showAnyTab('orders', ['po-table', 'otif-exceptions', 'po-file-records', 'pct']) && (
+          {showAnyTab('orders', ['po-table', 'otif-exceptions', 'quality-claims', 'po-file-records', 'pct', 'shipment-containers']) && (
             <NavCategory title="Order Management" icon={<IconOrder />} to="/dashboard/orders" collapsed={effectiveCollapsed}>
               {showTab('orders', 'po-table') && <NavLink to="/dashboard/orders?tab=po-table" onNavigate={closeMobile}>Daily PO and PI records</NavLink>}
               {showTab('orders', 'otif-exceptions') && <NavLink to="/dashboard/orders?tab=otif-exceptions" onNavigate={closeMobile}>Exception Requests</NavLink>}
+              {showTab('orders', 'quality-claims') && <NavLink to="/dashboard/orders?tab=quality-claims" onNavigate={closeMobile}>Quality Claims</NavLink>}
               {showTab('orders', 'po-file-records') && <NavLink to="/dashboard/orders?tab=po-file-records" onNavigate={closeMobile}>PO File Records</NavLink>}
+              {showTab('orders', 'shipment-containers') && <NavLink to="/dashboard/orders?tab=shipment-containers" onNavigate={closeMobile}>Shipment &amp; Planning</NavLink>}
               {showTab('orders', 'pct') && <NavLink to="/pct-beta" onNavigate={closeMobile}>Production Tracker <span className="ml-1 text-[9px] text-blue-600">BETA</span></NavLink>}
               {/* {showTab('orders', 'recent-po') && <NavLink to="/dashboard/orders?tab=recent-po" onNavigate={closeMobile}>PO Tracker</NavLink>} */}
             </NavCategory>

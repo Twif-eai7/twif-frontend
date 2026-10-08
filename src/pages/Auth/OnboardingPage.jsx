@@ -9,7 +9,7 @@ import NdaAgreementText from '../../components/shared/NdaAgreementText'
 import { MODE_TO_STORAGE } from '../../lib/signatureMode'
 import { useOrgLookup } from '../../hooks/useOrgLookup'
 import { usePortalUser } from '../../hooks/usePortalUser'
-import { homePathForMembership, isOrgLive, useProfileStore } from '../../stores/profileStore'
+import { homePathForMembership, useProfileStore } from '../../stores/profileStore'
 import { useAuth } from '../../hooks/useAuth'
 import { isValidUrl, isValidEmail } from '../../utils/validators'
 import { formatErrorFor, GSTIN_RE } from '../../utils/fieldFormats'
@@ -1311,10 +1311,10 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
     if (!email && !session) navigate('/auth', { replace: true })
   }, [email, session, authLoading, navigate, publicEntry])
 
-  // Already in a live organisation — leave registration, including the vendor form.
+  // Already in an organisation — leave registration, including the vendor form.
   useEffect(() => {
     if (publicEntry) return
-    if (!pendingReview && profileFetched && isOrgLive(orgMembership)) {
+    if (!pendingReview && profileFetched && orgMembership) {
       navigate(homePathForMembership(orgMembership), { replace: true })
     }
   }, [pendingReview, profileFetched, orgMembership, navigate, publicEntry])
@@ -1332,8 +1332,8 @@ export default function OnboardingPage({ forcedRole: routeForcedRole, publicEntr
   }, [pendingReview, currentUser?.id])
 
   useEffect(() => {
-    if (pendingReview && isOrgLive(orgMembership)) {
-      navigate('/dashboard', { replace: true })
+    if (pendingReview && orgMembership) {
+      navigate(homePathForMembership(orgMembership), { replace: true })
     }
   }, [pendingReview, orgMembership, navigate])
 

@@ -3,6 +3,7 @@ import { useProfileStore } from '../stores/profileStore'
 import { useAuthStore } from '../stores/authStore'
 import { supabase } from '../lib/supabase'
 import { impliedRateFor } from '../components/orderManagement/poUtils'
+import { uploadQualityClaimProof } from '../lib/qualityClaimStorage'
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL
 
@@ -201,6 +202,33 @@ export function usePOActions() {
     if (error) throw new Error(error.message)
   }
 
+  // ── Submit quality claim ──────────────────────────────────────────────────
+  // Proof photo (if any) is uploaded directly to Supabase Storage from the
+  // browser (see qualityClaimStorage.js) rather than routed through the
+  // backend like reportOtifException — no server-side involvement needed
+  // for a plain file + insert, same reasoning irf-attachments/factory-audits
+  // uploads already use.
+  const submitQualityClaim = async (poId, { claimType, lineItemId, description, proofImage, status, resolutionNote }) => {
+    const proofUrl = proofImage ? await uploadQualityClaimProof(proofImage, poId) : null
+    const isClosed = status === 'closed'
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('po_quality_claims')
+      .insert([{
+        po_id: poId,
+        line_item_id: lineItemId || null,
+        claim_type: claimType,
+        description,
+        proof_url: proofUrl,
+        submitted_by: memberId,
+        status: isClosed ? 'closed' : 'under_discussion',
+        closed_by: isClosed ? memberId : null,
+        closed_at: isClosed ? now : null,
+        resolution_note: isClosed ? resolutionNote : null,
+      }])
+    if (error) throw new Error(error.message)
+  }
+
   // ── Delete PO (soft delete via delete_meta) ───────────────────────────────
   const deletePO = async (poId, reason) => {
     const { error } = await supabase
@@ -219,5 +247,5 @@ export function usePOActions() {
     if (error) throw new Error(error.message)
   }
 
-  return { createPO, updatePO, uploadPI, revisePO, confirmPI, markErpSynced, bulkMarkErpSynced, addPiDelayComment, deletePO, reportOtifException, uploadProductDetails, submitAdvancePayment }
+  return { createPO, updatePO, uploadPI, revisePO, confirmPI, markErpSynced, bulkMarkErpSynced, addPiDelayComment, deletePO, reportOtifException, uploadProductDetails, submitAdvancePayment, submitQualityClaim }
 }

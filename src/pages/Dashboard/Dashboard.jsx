@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, Navigate } from 'react-router-dom'
 import Sidebar from '../../components/ui/Sidebar'
 import Header from '../../components/ui/Header'
 import SendRecipientsModal from '../../components/ui/SendRecipientsModal'
@@ -26,6 +26,9 @@ export default function Dashboard({ children }) {
 
   // Keep alive so AnalyticsSection shares the same cached fetch
   const { reload, error } = useDashboardData()
+
+  // Buyers use PLM, not the merchant or supplier dashboard.
+  if (role === 'Buyer') return <Navigate to="/plm" replace />
 
   return (
     <div className="flex h-dvh overflow-hidden bg-[#f8f8f8]">

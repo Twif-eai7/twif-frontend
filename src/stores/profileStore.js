@@ -230,13 +230,15 @@ export function useAssignedRegions() {
   return useProfileStore((s) => s.orgMembership?.assignedRegions ?? null)
 }
 
-/** Returns null (unrestricted) for owners and null-department admins; otherwise the stored allowed_modules */
+/** Returns null (unrestricted) for owners, null-department admins, and tech dept; otherwise the stored allowed_modules */
 export function useAllowedModules() {
   return useProfileStore((s) => {
     const om = s.orgMembership
     if (!om) return null
     if (om.role === 'owner') return null
     if (om.role === 'admin' && !om.department) return null
+    // Tech builds the portal, so a stored module list must not narrow them.
+    if (om.department === 'tech') return null
     return om.allowedModules ?? null
   })
 }

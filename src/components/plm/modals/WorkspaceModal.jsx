@@ -1387,7 +1387,7 @@ function MediaPanelContent({
                   )}
 
                   {/* Pin as brief image — top-right, not for suppliers */}
-                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && (
+                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && role !== 'qa' && (
                     <button type="button" title={isApproved ? 'Remove pin' : 'Pin as brief image'}
                       onClick={() => pinImage(ws.id, isApproved ? null : url)
                         .then(() => {
@@ -1512,7 +1512,7 @@ function MediaPanelContent({
                   <span className="absolute bottom-1 left-1 right-1 text-[7px] font-extrabold px-1 py-0.5 uppercase bg-white/90 rounded-sm text-[#1A1A18] pointer-events-none truncate text-center">Kaptr</span>
 
                   {/* Pin as brief image — top-right, not for suppliers */}
-                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && (
+                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && role !== 'qa' && (
                     <button type="button" title={isApproved ? 'Remove pin' : 'Pin as brief image'}
                       onClick={() => pinImage(ws.id, isApproved ? null : url)
                         .then(() => {
@@ -1642,7 +1642,7 @@ function MediaPanelContent({
                   )}
 
                   {/* Pin as brief image — top-right, not for suppliers */}
-                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && (
+                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && role !== 'qa' && (
                     <button type="button" title={isApproved ? 'Remove pin' : 'Pin as brief image'}
                       onClick={() => pinImage(ws.id, isApproved ? null : url)
                         .then(() => {
@@ -1771,7 +1771,7 @@ function MediaPanelContent({
                   )}
 
                   {/* Pin as brief image — top-right, not for suppliers */}
-                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && (
+                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && role !== 'qa' && (
                     <button type="button" title={isApproved ? 'Remove pin' : 'Pin as brief image'}
                       onClick={() => pinImage(ws.id, isApproved ? null : url)
                         .then(() => {
@@ -1980,7 +1980,7 @@ function MediaPanelContent({
                 {label && !uploading && (
                   <span className="absolute bottom-1 left-1 right-1 text-[7px] font-extrabold px-1 py-0.5 uppercase bg-white/90 rounded-sm text-[#1A1A18] truncate text-center pointer-events-none">{label}</span>
                 )}
-                {!selectMode && ws?.id && !isReadOnly && !uploading && role !== 'supplier' && (
+                {!selectMode && ws?.id && !isReadOnly && !uploading && role !== 'supplier' && role !== 'qa' && (
                   <button type="button" title={isApproved ? 'Remove approval' : 'Set as approved product'}
                     onClick={() => pinImage(ws.id, isApproved ? null : url)
                       .then(() => {
@@ -2105,7 +2105,7 @@ function MediaPanelContent({
                   )}
 
                   {/* Pin as brief image — top-right, not for suppliers */}
-                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && (
+                  {!selectMode && ws?.id && !isReadOnly && role !== 'supplier' && role !== 'qa' && (
                     <button type="button" title={isApproved ? 'Remove pin' : 'Pin as brief image'}
                       onClick={() => pinImage(ws.id, isApproved ? null : url)
                         .then(() => {
@@ -2362,7 +2362,8 @@ export default function WorkspaceModal() {
   const richComposerRef = useRef(null)
   const [replyTo,   setReplyTo]   = useState(null)
   const [tabState,  setTabState]  = useState({ wsId: null, tab: 'details' })
-  const [chatTab,   setChatTab]   = useState('buyer')
+  // QA's tab list is Group Chat only — defaulting to 'buyer' left them on a tab that doesn't exist for them.
+  const [chatTab,   setChatTab]   = useState(() => role === 'qa' ? 'group' : 'buyer')
   // Tabs the viewer has actually switched to during this open — their unread badge (below)
   // clears the moment they land on it, same as Slack/WhatsApp marking a thread read on open
   // rather than requiring a full scroll-through. Reset per-workspace so re-opening later
@@ -3751,7 +3752,7 @@ export default function WorkspaceModal() {
   // price/qty and hitting "Proceed to Sample" again collides with the still-existing sample
   // order on the backend ("Sample order already exists"). Pre-approval hold/reject (no sample
   // order yet) still unlocks the brief as before, since there's nothing to collide with.
-  const briefLocked = !hasEditGrant && (isReadOnly || role === 'supplier')
+  const briefLocked = !hasEditGrant && (isReadOnly || role === 'supplier' || role === 'qa')
     || ['approved', 'sample', 'sample_shipped', 'production'].includes(ws?.status)
     || (['on_hold', 'rejected'].includes(ws?.status) && !!ws?.sampleOrder)
   // briefLocked is true for a vendor viewer at ANY stage (they never edit the buyer's brief,
@@ -4255,7 +4256,7 @@ export default function WorkspaceModal() {
             On phones these shrink to one compact row (short labels, tight padding) so the
             status bar barely eats any height and the work area below gets the space. */}
         <div className={`flex items-center flex-wrap ${isPhone ? 'w-full gap-1.5' : 'gap-2 sm:gap-4'}`}>
-          {ws && role !== 'supplier' && ['on_hold', 'rejected'].includes(ws.status) && (
+          {ws && role !== 'supplier' && role !== 'qa' && ['on_hold', 'rejected'].includes(ws.status) && (
             <div className={`relative ${isPhone ? 'flex-1' : ''}`}>
               <button
                 type="button"
@@ -4289,7 +4290,7 @@ export default function WorkspaceModal() {
               )}
             </div>
           )}
-          {ws && !isReadOnly && role !== 'supplier' && !['on_hold', 'rejected'].includes(ws.status) && (
+          {ws && !isReadOnly && role !== 'supplier' && role !== 'qa' && !['on_hold', 'rejected'].includes(ws.status) && (
             <div className="relative">
               <div className="flex items-center gap-1.5">
                 <button
@@ -4653,7 +4654,7 @@ export default function WorkspaceModal() {
                         one value size, and every field now gets the same border-b instead of
                         some having it, one having a plain divider, and one having neither. */}
                     <div className="flex-1 min-w-0 flex flex-col gap-1 pt-1">
-                      {role !== 'supplier' && (
+                      {role !== 'supplier' && role !== 'qa' && (
                         <>
                           <div className="flex items-center justify-between mb-0.5">
                             <div className={`text-[10px] font-bold uppercase tracking-[.08em] ${briefErrors.has('buyer_ref') ? 'text-red-500' : 'text-[#6d28d9]'}`}>
@@ -5076,7 +5077,7 @@ export default function WorkspaceModal() {
                   if (!Object.keys(changedFindings).length) return
 
                   setSavingFindings(true)
-                  try { await saveSampleFindings(so.id, ws.id, changedFindings) }
+                  try { await saveSampleFindings(so.id, ws.id, changedFindings, { dim: dimUnit, weight: weightUnit }) }
                   catch (err) { toast(err.message) }
                   finally { setSavingFindings(false) }
                 }
@@ -5106,7 +5107,7 @@ export default function WorkspaceModal() {
                 // the merchant. Safe to allow here: SKUCard.jsx already blocks a supplier from
                 // ever opening a workspace they aren't the accepted/invited vendor for, so
                 // reaching this component with role === 'supplier' already implies real access.
-                const findingsLocked  = (role !== 'merchant' && role !== 'supplier') || isReadOnly || isDropped || !!viewingVersion
+                const findingsLocked  = (role !== 'merchant' && role !== 'supplier' && role !== 'qa') || isReadOnly || isDropped || !!viewingVersion
                 // Additional Notes is a shared note field (not a findings value), so both
                 // merchant and buyer can write to it — only lock it for read-only/dropped/
                 // past-version views, not by role.
@@ -6778,6 +6779,17 @@ export default function WorkspaceModal() {
               toast?.('Saved as a new sample image')
             }}
             copyOnlyReason="Sample images can't be replaced in place — your edit will be saved as a new sample image instead."
+          />
+        ) : role === 'qa' ? (
+          <ImageEditorModal
+            imageUrl={editingRefImage.url}
+            toast={toast}
+            onClose={() => setEditingRefImage(null)}
+            onSaveAsCopy={async (blob) => {
+              await saveReferenceMediaEdit(ws.id, blob, { mode: 'copy' })
+              toast?.('Saved as a new image in Reference Media')
+            }}
+            copyOnlyReason="QA reviewers can't edit the original image — your edit is saved as a new copy in Reference Media instead."
           />
         ) : (
           <ImageEditorModal

@@ -4,7 +4,7 @@ import { AuthSplitLayout, AuthEmailField, AuthGradientButton } from '../../compo
 import { Alert } from '../../components/ui'
 import { useEmailAuth } from '../../hooks/useEmailAuth'
 import { useAuth } from '../../hooks/useAuth'
-import { homePathForMembership, isOrgLive, useProfileStore } from '../../stores/profileStore'
+import { homePathForMembership, useProfileStore } from '../../stores/profileStore'
 
 const MODES = {
   login: {
@@ -50,10 +50,10 @@ export default function AuthPage({ forcedRole, defaultMode = 'login' }) {
 
     const onboardingPath = forcedRole === 'supplier' ? '/auth/vendor/onboarding_vendor' : '/onboarding'
 
-    // An existing organisation wins over an unfinished signup flag, and over
-    // the vendor-only entrance. Otherwise these accounts get stuck in
-    // vendor registration with no way back.
-    if (isOrgLive(orgMembership)) {
+    // Any existing organisation membership skips registration, including a
+    // pending, rejected, or suspended org. An unfinished signup flag and the
+    // vendor-only entrance do not override that.
+    if (orgMembership) {
       navigate(homePathForMembership(orgMembership), { replace: true })
       return
     }
