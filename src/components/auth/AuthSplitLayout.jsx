@@ -1,5 +1,20 @@
 import { LogoMark } from '../ui'
 
+const PRIVACY_POLICY_URL = 'https://www.eai7.com/privacy'
+
+function PrivacyPolicyLink({ className = '' }) {
+  return (
+    <a
+      href={PRIVACY_POLICY_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`hover:text-[#4d68f0] hover:underline ${className}`}
+    >
+      Privacy Policy
+    </a>
+  )
+}
+
 const PANEL_COPY = {
   login: {
     label: 'TECHNOLOGY',
@@ -65,7 +80,11 @@ export default function AuthSplitLayout({ mode = 'login', children }) {
             </p>
           </div>
 
-          <p className="relative z-10 text-xs text-[#94a3b8]">© {new Date().getFullYear()} eai7</p>
+          <p className="relative z-10 text-xs text-[#94a3b8] flex items-center gap-2">
+            <span>© {new Date().getFullYear()} eai7</span>
+            <span aria-hidden="true">·</span>
+            <PrivacyPolicyLink />
+          </p>
         </aside>
 
         {/* Right panel */}
@@ -75,6 +94,10 @@ export default function AuthSplitLayout({ mode = 'login', children }) {
           </div>
 
           {children}
+
+          <p className="md:hidden text-center text-xs text-[#94a3b8] mt-8">
+            <PrivacyPolicyLink />
+          </p>
         </main>
       </div>
     </div>
