@@ -26,6 +26,8 @@ const SignedAgreementSection = lazy(() => import('./pages/Dashboard/sections/Sig
 const IrfSection        = lazy(() => import('./pages/Dashboard/sections/IrfSection'))
 const QcReportsSection  = lazy(() => import('./pages/Dashboard/sections/QcReportsSection'))
 const CatalogsSection        = lazy(() => import('./pages/Dashboard/sections/CatalogsSection'))
+const Article3dSection       = lazy(() => import('./pages/Dashboard/sections/Article3dSection'))
+const Article3dPreview       = lazy(() => import('./pages/Dashboard/Article3dPreview'))
 const LogisticsSection       = lazy(() => import('./pages/Dashboard/sections/LogisticsSection'))
 const ProjectsSection        = lazy(() => import('./pages/Dashboard/sections/ProjectsSection'))
 const ProjectBoardSection    = lazy(() => import('./pages/Dashboard/sections/ProjectBoardSection'))
@@ -126,6 +128,9 @@ export default function App() {
         }>
         <Routes>
           {/* Public */}
+          {import.meta.env.DEV && (
+            <Route path="/preview/article-3d" element={<Article3dPreview />} />
+          )}
           <Route path="/" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/auth/buyer" element={<AuthPage forcedRole="buyer" />} />
@@ -157,6 +162,7 @@ export default function App() {
             <Route path="analytics-v3" element={<AnalyticsV3Section />} /> */}
             <Route path="analytics-demo" element={<AnalyticsDummySection />} />
             <Route path="catalogs"  element={<CatalogsSection />} />
+            <Route path="article-3d" element={<Article3dSection />} />
             <Route path="projects"          element={<ProjectsSection />} />
             <Route path="projects/my-tasks" element={<MyTasksSection />} />
             <Route path="projects/:projectId" element={<ProjectBoardSection />} />

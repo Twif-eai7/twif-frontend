@@ -249,6 +249,7 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
   // too — erp is one of the two departments that get "batch ready to
   // review" alerts, so they need to actually be able to reach this page.
   const canSeeStyleLibrary = orgMembership?.department === 'tech' || orgMembership?.department === 'erp'
+  const canSeePhotoTo3d = orgMembership?.department === 'tech'
   // Close mobile drawer on navigation
   const closeMobile = mobileOpen ? onMobileClose : undefined
 
@@ -404,6 +405,9 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
               {showTab('logistics', 'inspection-pending-dispatch') && <NavLink to="/dashboard/logistics?tab=inspection-pending-dispatch" onNavigate={closeMobile}>Inspection Pending Dispatch</NavLink>}
               {showTab('logistics', 'reports') && <NavLink to="/dashboard/logistics?tab=reports" onNavigate={closeMobile}>Reports</NavLink>}
             </NavCategory>
+          )}
+          {canSeePhotoTo3d && (
+            <NavLink to="/dashboard/article-3d" onNavigate={closeMobile}>Photo to 3D</NavLink>
           )}
         </>
       )
