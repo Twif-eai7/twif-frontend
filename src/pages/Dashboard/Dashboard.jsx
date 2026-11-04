@@ -1,4 +1,4 @@
-import { Outlet, Navigate } from 'react-router-dom'
+import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import Sidebar from '../../components/ui/Sidebar'
 import Header from '../../components/ui/Header'
 import SendRecipientsModal from '../../components/ui/SendRecipientsModal'
@@ -18,6 +18,7 @@ export default function Dashboard({ children }) {
   const profile        = useProfileHeader()
   const allowedModules = useAllowedModules()
   const { signOut } = useAuth()
+  const onArticle3d = useLocation().pathname === '/dashboard/article-3d'
 
   const sidebarCollapsed   = useUiStore((s) => s.sidebarCollapsed)
   const mobileOpen         = useUiStore((s) => s.mobileOpen)
@@ -27,8 +28,9 @@ export default function Dashboard({ children }) {
   // Keep alive so AnalyticsSection shares the same cached fetch
   const { reload, error } = useDashboardData()
 
-  // Buyers use PLM, not the merchant or supplier dashboard.
-  if (role === 'Buyer') return <Navigate to="/plm" replace />
+  // Buyers use PLM, not the merchant or supplier dashboard. Photo to 3D stays
+  // open for every role until a later pass decides who should lose it.
+  if (role === 'Buyer' && !onArticle3d) return <Navigate to="/plm" replace />
 
   return (
     <div className="flex h-dvh overflow-hidden bg-[#f8f8f8]">

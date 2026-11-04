@@ -249,7 +249,6 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
   // too — erp is one of the two departments that get "batch ready to
   // review" alerts, so they need to actually be able to reach this page.
   const canSeeStyleLibrary = orgMembership?.department === 'tech' || orgMembership?.department === 'erp'
-  const canSeePhotoTo3d = orgMembership?.department === 'tech'
   // Close mobile drawer on navigation
   const closeMobile = mobileOpen ? onMobileClose : undefined
 
@@ -259,6 +258,7 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
         {/* Kaptr (SKU capture) intentionally omitted for buyers — buyer self-create isn't wired yet. */}
         <NavLink to="/plm" onNavigate={closeMobile}>PD Tracker</NavLink>
       </NavCategory>
+      <NavLink to="/dashboard/article-3d" onNavigate={closeMobile}>Photo to 3D</NavLink>
       {/* Coming soon — uncomment as sections are built out for buyers
       <NavCategory title="Product Catalogs" icon={<IconGrid />} to="/dashboard/catalogs" collapsed={effectiveCollapsed}>
         <NavLink href="/collections/home-decor" onNavigate={closeMobile}>Home Decor</NavLink>
@@ -406,9 +406,7 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
               {showTab('logistics', 'reports') && <NavLink to="/dashboard/logistics?tab=reports" onNavigate={closeMobile}>Reports</NavLink>}
             </NavCategory>
           )}
-          {canSeePhotoTo3d && (
-            <NavLink to="/dashboard/article-3d" onNavigate={closeMobile}>Photo to 3D</NavLink>
-          )}
+          <NavLink to="/dashboard/article-3d" onNavigate={closeMobile}>Photo to 3D</NavLink>
         </>
       )
     })()
@@ -427,6 +425,7 @@ export default function Sidebar({ role, allowedModules, collapsed, onCollapseCha
           QcReportsSection.jsx/SupplierQcReports.jsx) - IRF above only lets
           them REQUEST an inspection, never shows the result. */}
       <NavCategory title="QC Reports" icon={<IconCheck />} to="/dashboard/qc-reports" collapsed={effectiveCollapsed} />
+      <NavLink to="/dashboard/article-3d" onNavigate={closeMobile}>Photo to 3D</NavLink>
       {/* Coming soon — uncomment as sections are built out for suppliers
       <NavCategory title="My Dashboard" icon={<IconChart />} to="/dashboard" collapsed={effectiveCollapsed}>
         <NavLink to="/dashboard" onNavigate={closeMobile}>Overview</NavLink>

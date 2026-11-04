@@ -126,6 +126,14 @@ export default function PLMTopBar() {
           </Link>
         )}
         {isBuyerOrSupplier && (
+          <Link
+            to="/dashboard/article-3d"
+            className="text-[9px] md:text-[11px] font-bold uppercase tracking-[.04em] md:tracking-[.08em] text-[#1A1A18] hover:opacity-45 transition-opacity whitespace-nowrap"
+          >
+            Photo to 3D
+          </Link>
+        )}
+        {isBuyerOrSupplier && (
           <UserMenu header={header} onLogout={handleLogout} />
         )}
         <SharedWithMeTrigger />
