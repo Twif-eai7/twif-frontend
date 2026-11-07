@@ -8,6 +8,8 @@ const MAX_BYTES = 25 * 1024 * 1024
 const LAST_JOB_KEY = 'article3d:lastJobId'
 const POLL_MS = 4000
 const TIMEOUT_MS = 5 * 60 * 1000
+// Visual progress maps the typical mock/generate window; stays under 100 until the job finishes.
+const PROGRESS_TARGET_MS = 8000
 const TIMEOUT_MESSAGE = 'This is taking longer than expected. You can try another photo. If you leave this page, a finished model can still be opened from this job.'
 
 function rejectionReason(file) {
@@ -20,15 +22,17 @@ function rejectionReason(file) {
   return ''
 }
 
-function formatElapsed(createdAt, now) {
-  const seconds = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 1000))
-  const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
-  const ss = String(seconds % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-}
-
 function timedOut(createdAt, now = Date.now()) {
   return now - Date.parse(createdAt) >= TIMEOUT_MS
+}
+
+function progressPercent(createdAt, now, phase) {
+  if (phase === 'uploading' || !createdAt) return 4
+  const elapsed = Math.max(0, now - Date.parse(createdAt))
+  const linear = (elapsed / PROGRESS_TARGET_MS) * 95
+  if (linear < 95) return Math.max(4, Math.floor(linear))
+  const extra = elapsed - PROGRESS_TARGET_MS
+  return Math.min(99, 95 + Math.floor((1 - Math.exp(-extra / 30000)) * 4))
 }
 
 export default function Article3dSection() {
@@ -150,18 +154,20 @@ export default function Article3dSection() {
   }, [])
 
   useEffect(() => {
-    if (phase !== 'processing' || !createdAt) return
+    if (phase !== 'uploading' && phase !== 'processing') return undefined
+    let frame = 0
     const tick = () => {
       const next = Date.now()
       setNow(next)
-      if (timedOut(createdAt, next)) {
+      if (createdAt && timedOut(createdAt, next)) {
         setPhase('timeout')
         stopPolling()
+        return
       }
+      frame = requestAnimationFrame(tick)
     }
-    tick()
-    const timer = setInterval(tick, 1000)
-    return () => clearInterval(timer)
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
   }, [phase, createdAt])
 
   useEffect(() => {
@@ -274,157 +280,236 @@ export default function Article3dSection() {
   const selected = Boolean(file && previewUrl)
   const waiting = phase === 'uploading' || phase === 'processing'
   const showChooser = phase === 'idle'
+  const percent = progressPercent(createdAt, now, phase)
+
+  const secondaryBtn =
+    'inline-flex items-center justify-center px-4 py-2.5 rounded-lg border-2 border-white/70 bg-transparent text-sm font-semibold text-white hover:bg-white/10 transition-colors'
+  const primaryBtn =
+    'inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] hover:brightness-105 transition-[filter]'
 
   return (
-    <div className="flex flex-col h-full bg-[#fafafa]">
-      <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-stone-200/80 flex-shrink-0 bg-white">
-        <h1 className="text-[15px] font-semibold text-stone-900 tracking-tight">Photo to 3D</h1>
-        <p className="text-[12px] text-stone-400 mt-0.5">One article photo becomes a model you can rotate.</p>
-      </div>
+    <div
+      className="relative flex flex-col h-full min-h-0 overflow-hidden text-white"
+      style={{
+        ['--wm-yellow']: '#FFC220',
+        ['--wm-blue']: '#0071CE',
+        ['--wm-blue-deep']: '#0057A0',
+        fontFamily: "'Figtree', 'DM Sans', sans-serif",
+        background:
+          'linear-gradient(135deg, var(--wm-blue) 0%, var(--wm-blue-deep) 55%, #004888 100%)',
+      }}
+    >
+      <style>{`
+        @keyframes wm-orbit {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes wm-pulse-ring {
+          0%, 100% { transform: scale(0.92); opacity: 0.35; }
+          50% { transform: scale(1.08); opacity: 0.7; }
+        }
+        @keyframes wm-bar-shimmer {
+          0% { background-position: 100% 0; }
+          100% { background-position: -100% 0; }
+        }
+      `}</style>
 
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5">
-        <div className="max-w-xl">
-          {(showChooser || previewUrl) && (
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-2 bg-[var(--wm-yellow)]"
+        aria-hidden="true"
+      />
+
+      {waiting ? (
+        <div
+          className="relative flex-1 min-h-0 flex flex-col items-center justify-center px-6 text-center"
+          role="status"
+          aria-live="polite"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
+          <div className="relative w-44 h-44 sm:w-56 sm:h-56" aria-hidden="true">
             <div
-              onDragEnter={onDragEnter}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
-              className={`rounded-xl border-2 border-dashed transition-colors ${
-                dragging && showChooser
-                  ? 'border-stone-900 bg-stone-100'
-                  : 'border-stone-300 bg-white'
-              }`}
+              className="absolute inset-0 rounded-full border-2 border-[var(--wm-yellow)]/25"
+              style={{ animation: 'wm-pulse-ring 2.4s ease-in-out infinite' }}
+            />
+            <div
+              className="absolute inset-3 rounded-full border-2 border-dashed border-white/35"
+              style={{ animation: 'wm-orbit 10s linear infinite' }}
+            />
+            <div
+              className="absolute inset-0"
+              style={{ animation: 'wm-orbit 2.8s linear infinite' }}
             >
-              {previewUrl ? (
-                <div className="p-4">
-                  <img
-                    src={previewUrl}
-                    alt=""
-                    className="w-full max-h-80 object-contain rounded-lg bg-stone-50"
-                  />
-                  {file && (
-                    <p className="mt-3 text-[13px] font-medium text-stone-800 truncate">{file.name}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-stone-400" aria-hidden="true">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  <p className="text-sm font-medium text-stone-700">Drop one article photo here</p>
-                  <p className="text-[12px] text-stone-400">JPG, PNG, or WebP · up to 25 MB</p>
-                </div>
-              )}
+              <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-[var(--wm-yellow)] shadow-[0_0_18px_rgba(255,194,32,0.85)]" />
             </div>
-          )}
-
-          {showChooser && (
-            <div className="mt-3 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => inputRef.current?.click()}
-                className="inline-flex items-center px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs font-semibold text-stone-800 shadow-sm hover:bg-stone-50"
-              >
-                {selected ? 'Choose a different photo' : 'Choose photo'}
-              </button>
-              <input
-                ref={inputRef}
-                type="file"
-                accept=".jpg,.jpeg,.png,.webp"
-                className="hidden"
-                onChange={onInputChange}
-              />
-            </div>
-          )}
-
-          {error && phase !== 'failed' && (
-            <p role="alert" className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          {waiting && (
-            <div className="mt-4" role="status">
-              <p className="text-sm font-medium text-stone-800">Generating your model</p>
-              {phase === 'processing' && createdAt && (
-                <p className="mt-1 text-[13px] tabular-nums text-stone-500">{formatElapsed(createdAt, now)}</p>
-              )}
-            </div>
-          )}
-
-          {phase === 'timeout' && (
-            <div className="mt-4">
-              <p className="text-[13px] text-stone-600 leading-relaxed">{TIMEOUT_MESSAGE}</p>
-              <button
-                type="button"
-                onClick={resetToIdle}
-                className="mt-3 inline-flex items-center px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs font-semibold text-stone-800 shadow-sm hover:bg-stone-50"
-              >
-                Try another photo
-              </button>
-            </div>
-          )}
-
-          {phase === 'failed' && (
-            <div className="mt-4">
-              {jobError && (
-                <p role="alert" className="text-[13px] text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                  {jobError}
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={resetToIdle}
-                className="mt-3 inline-flex items-center px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs font-semibold text-stone-800 shadow-sm hover:bg-stone-50"
-              >
-                Try another photo
-              </button>
-            </div>
-          )}
-
-          {phase === 'ready' && modelUrl && (
-            <div className="mt-4">
-              <model-viewer
-                src={modelUrl}
-                alt="Generated article model"
-                camera-controls=""
-                auto-rotate=""
-                shadow-intensity="1"
-                className="block w-full h-[480px] rounded-xl border border-stone-200 bg-white"
-              />
-              <p className="mt-2 text-[12px] text-stone-400">Drag to orbit, scroll to zoom.</p>
-            </div>
-          )}
-
-          {phase === 'ready' && modelError && (
-            <div className="mt-4">
-              <p role="alert" className="text-[13px] text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                {modelError}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-4xl sm:text-5xl font-semibold tabular-nums tracking-tight text-white">
+                {percent}
+                <span className="text-2xl sm:text-3xl text-[var(--wm-yellow)]">%</span>
               </p>
-              <button
-                type="button"
-                onClick={resetToIdle}
-                className="mt-3 inline-flex items-center px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs font-semibold text-stone-800 shadow-sm hover:bg-stone-50"
-              >
-                Try another photo
-              </button>
             </div>
-          )}
+          </div>
 
-          {showChooser && selected && (
-            <button
-              type="button"
-              onClick={onGenerate}
-              className="mt-4 inline-flex items-center px-3.5 py-2 rounded-lg bg-stone-900 text-xs font-semibold text-white hover:bg-stone-800"
-            >
-              Generate 3D model
-            </button>
+          <h2 className="mt-8 text-2xl sm:text-3xl font-semibold tracking-tight text-white">
+            {phase === 'uploading' ? 'Uploading your photo' : 'Generating your model'}
+          </h2>
+          <p className="mt-2 text-sm sm:text-base text-white/70 max-w-md">
+            {phase === 'uploading'
+              ? 'Sending the article photo…'
+              : 'Building a rotatable 3D model from your photo.'}
+          </p>
+
+          <div className="mt-8 w-full max-w-md h-2 rounded-full bg-white/15 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-[width] duration-150 ease-out"
+              style={{
+                width: `${percent}%`,
+                background:
+                  'linear-gradient(90deg, var(--wm-yellow) 0%, #ffe08a 45%, var(--wm-yellow) 90%)',
+                backgroundSize: '200% 100%',
+                animation: 'wm-bar-shimmer 1.4s linear infinite',
+              }}
+            />
+          </div>
+        </div>
+      ) : phase === 'ready' && modelUrl ? (
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <model-viewer
+            src={modelUrl}
+            alt="Generated article model"
+            camera-controls=""
+            auto-rotate=""
+            shadow-intensity="1"
+            className="block w-full h-full min-h-0 bg-[#f4f7fb]"
+          />
+          <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/90 bg-black/35 rounded-full px-3 py-1.5">
+            Drag to orbit, scroll to zoom.
+          </p>
+          {previewUrl && (
+            <div className="absolute top-4 right-4 sm:top-5 sm:right-5 w-20 h-20 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-[var(--wm-yellow)] shadow-lg bg-white">
+              <img
+                src={previewUrl}
+                alt={file?.name ? `Uploaded photo ${file.name}` : 'Uploaded photo'}
+                className="w-full h-full object-cover"
+              />
+            </div>
           )}
         </div>
-      </div>
+      ) : (
+        <div className="relative flex flex-col flex-1 min-h-0 px-4 sm:px-8 pt-8 pb-6">
+          <header className="flex-shrink-0 max-w-3xl">
+            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-white">
+              Photo to 3D
+            </h1>
+            <p className="mt-2 text-sm sm:text-base text-white/75">
+              One article photo becomes a model you can rotate.
+            </p>
+          </header>
+
+          <div className="flex-1 min-h-0 mt-6 flex flex-col gap-4">
+            {(showChooser || previewUrl) && (
+              <div
+                onDragEnter={onDragEnter}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                className={`flex-1 min-h-[280px] rounded-2xl border-2 border-dashed transition-colors ${
+                  dragging && showChooser
+                    ? 'border-[var(--wm-yellow)] bg-[var(--wm-yellow)]/20'
+                    : 'border-white/45 bg-white/10'
+                }`}
+              >
+                {previewUrl ? (
+                  <div className="h-full flex flex-col p-4 sm:p-6">
+                    <img
+                      src={previewUrl}
+                      alt=""
+                      className="flex-1 w-full min-h-0 object-contain rounded-xl bg-black/15"
+                    />
+                    {file && (
+                      <p className="mt-3 text-sm font-medium text-white truncate">{file.name}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-[var(--wm-yellow)]" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    <p className="text-lg sm:text-xl font-semibold text-white">Drop one article photo here</p>
+                    <p className="text-sm text-white/70">JPG, PNG, or WebP · up to 25 MB</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showChooser && (
+              <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className={selected ? secondaryBtn : primaryBtn}
+                >
+                  {selected ? 'Choose a different photo' : 'Choose photo'}
+                </button>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp"
+                  className="hidden"
+                  onChange={onInputChange}
+                />
+                {selected && (
+                  <button type="button" onClick={onGenerate} className={primaryBtn}>
+                    Generate 3D model
+                  </button>
+                )}
+              </div>
+            )}
+
+            {error && phase !== 'failed' && (
+              <p role="alert" className="flex-shrink-0 text-sm text-[#3b1d00] bg-[var(--wm-yellow)] border border-[#e0a800] rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            {phase === 'timeout' && (
+              <div className="flex-shrink-0 max-w-2xl">
+                <p className="text-sm text-white/85 leading-relaxed">{TIMEOUT_MESSAGE}</p>
+                <button type="button" onClick={resetToIdle} className={`${secondaryBtn} mt-3`}>
+                  Try another photo
+                </button>
+              </div>
+            )}
+
+            {phase === 'failed' && (
+              <div className="flex-shrink-0 max-w-2xl">
+                {jobError && (
+                  <p role="alert" className="text-sm text-[#3b1d00] bg-[var(--wm-yellow)] border border-[#e0a800] rounded-lg px-3 py-2">
+                    {jobError}
+                  </p>
+                )}
+                <button type="button" onClick={resetToIdle} className={`${secondaryBtn} mt-3`}>
+                  Try another photo
+                </button>
+              </div>
+            )}
+
+            {phase === 'ready' && modelError && (
+              <div className="flex-shrink-0 max-w-2xl">
+                <p role="alert" className="text-sm text-[#3b1d00] bg-[var(--wm-yellow)] border border-[#e0a800] rounded-lg px-3 py-2">
+                  {modelError}
+                </p>
+                <button type="button" onClick={resetToIdle} className={`${secondaryBtn} mt-3`}>
+                  Try another photo
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
