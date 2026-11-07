@@ -383,11 +383,30 @@ export default function Article3dSection() {
             shadow-intensity="1"
             className="block w-full h-full min-h-0 bg-[#f4f7fb]"
           />
+          <div className="absolute top-4 left-4 sm:top-5 sm:left-5 flex flex-wrap items-center gap-2 z-10">
+            <button
+              type="button"
+              onClick={resetToIdle}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/95 text-sm font-semibold text-[var(--wm-blue)] shadow-md hover:bg-white transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={resetToIdle}
+              className="inline-flex items-center px-3 py-2 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] shadow-md hover:brightness-105 transition-[filter]"
+            >
+              Upload another photo
+            </button>
+          </div>
           <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/90 bg-black/35 rounded-full px-3 py-1.5">
             Drag to orbit, scroll to zoom.
           </p>
           {previewUrl && (
-            <div className="absolute top-4 right-4 sm:top-5 sm:right-5 w-20 h-20 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-[var(--wm-yellow)] shadow-lg bg-white">
+            <div className="absolute top-4 right-4 sm:top-5 sm:right-5 w-20 h-20 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-[var(--wm-yellow)] shadow-lg bg-white z-10">
               <img
                 src={previewUrl}
                 alt={file?.name ? `Uploaded photo ${file.name}` : 'Uploaded photo'}
