@@ -27,12 +27,155 @@ function timedOut(createdAt, now = Date.now()) {
 }
 
 function progressPercent(createdAt, now, phase) {
-  if (phase === 'uploading' || !createdAt) return 4
+  if (phase === 'uploading' || !createdAt) return 1
   const elapsed = Math.max(0, now - Date.parse(createdAt))
-  const linear = (elapsed / PROGRESS_TARGET_MS) * 95
-  if (linear < 95) return Math.max(4, Math.floor(linear))
-  const extra = elapsed - PROGRESS_TARGET_MS
-  return Math.min(99, 95 + Math.floor((1 - Math.exp(-extra / 30000)) * 4))
+  // Linear 1→99 over the expected generate window; hold at 99 until the job finishes.
+  return Math.min(99, Math.max(1, Math.floor((elapsed / PROGRESS_TARGET_MS) * 99)))
+}
+
+function ModelBuildAnimation({ percent }) {
+  const stage = Math.min(5, Math.floor(percent / 20) + 1)
+  return (
+    <div className="relative w-56 h-56 sm:w-72 sm:h-72" aria-hidden="true">
+      <div
+        className="absolute inset-6 rounded-full border border-[var(--wm-yellow)]/20"
+        style={{ animation: 'wm-pulse-ring 3s ease-in-out infinite' }}
+      />
+      <svg viewBox="0 0 240 240" className="absolute inset-0 w-full h-full overflow-visible">
+        <defs>
+          <linearGradient id="wmBuildFace" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#FFC220" stopOpacity="0.95" />
+            <stop offset="100%" stopColor="#ffe08a" stopOpacity="0.75" />
+          </linearGradient>
+          <linearGradient id="wmBuildSide" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0071CE" stopOpacity="0.95" />
+            <stop offset="100%" stopColor="#004888" stopOpacity="0.9" />
+          </linearGradient>
+          <linearGradient id="wmBuildTop" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="#5aa8e8" stopOpacity="0.95" />
+            <stop offset="100%" stopColor="#FFC220" stopOpacity="0.85" />
+          </linearGradient>
+        </defs>
+
+        {/* Floor grid */}
+        <g opacity="0.35" stroke="rgba(255,255,255,0.45)" strokeWidth="1" fill="none">
+          <path d="M40 160 L120 200 L200 160 L120 120 Z" />
+          <path d="M60 150 L120 180 L180 150" />
+          <path d="M80 140 L120 160 L160 140" />
+          <path d="M100 130 L120 140 L140 130" />
+        </g>
+
+        {/* Layer 1 — base */}
+        <g
+          style={{
+            opacity: stage >= 1 ? 1 : 0,
+            transform: stage >= 1 ? 'translateY(0)' : 'translateY(18px)',
+            transition: 'opacity 0.35s ease, transform 0.45s ease',
+          }}
+        >
+          <polygon points="120,168 168,144 120,120 72,144" fill="url(#wmBuildTop)" />
+          <polygon points="72,144 120,168 120,188 72,164" fill="url(#wmBuildSide)" />
+          <polygon points="120,168 168,144 168,164 120,188" fill="url(#wmBuildFace)" />
+        </g>
+
+        {/* Layer 2 */}
+        <g
+          style={{
+            opacity: stage >= 2 ? 1 : 0,
+            transform: stage >= 2 ? 'translateY(0)' : 'translateY(18px)',
+            transition: 'opacity 0.35s ease, transform 0.45s ease',
+          }}
+        >
+          <polygon points="120,140 160,120 120,100 80,120" fill="url(#wmBuildTop)" />
+          <polygon points="80,120 120,140 120,160 80,140" fill="url(#wmBuildSide)" />
+          <polygon points="120,140 160,120 160,140 120,160" fill="url(#wmBuildFace)" />
+        </g>
+
+        {/* Layer 3 */}
+        <g
+          style={{
+            opacity: stage >= 3 ? 1 : 0,
+            transform: stage >= 3 ? 'translateY(0)' : 'translateY(18px)',
+            transition: 'opacity 0.35s ease, transform 0.45s ease',
+          }}
+        >
+          <polygon points="120,112 152,96 120,80 88,96" fill="url(#wmBuildTop)" />
+          <polygon points="88,96 120,112 120,132 88,116" fill="url(#wmBuildSide)" />
+          <polygon points="120,112 152,96 152,116 120,132" fill="url(#wmBuildFace)" />
+        </g>
+
+        {/* Layer 4 — body taper */}
+        <g
+          style={{
+            opacity: stage >= 4 ? 1 : 0,
+            transform: stage >= 4 ? 'translateY(0)' : 'translateY(18px)',
+            transition: 'opacity 0.35s ease, transform 0.45s ease',
+          }}
+        >
+          <polygon points="120,84 144,72 120,60 96,72" fill="url(#wmBuildTop)" />
+          <polygon points="96,72 120,84 120,104 96,92" fill="url(#wmBuildSide)" />
+          <polygon points="120,84 144,72 144,92 120,104" fill="url(#wmBuildFace)" />
+        </g>
+
+        {/* Layer 5 — crown / spark */}
+        <g
+          style={{
+            opacity: stage >= 5 ? 1 : 0,
+            transform: stage >= 5 ? 'translateY(0) scale(1)' : 'translateY(14px) scale(0.85)',
+            transformOrigin: '120px 56px',
+            transition: 'opacity 0.35s ease, transform 0.45s ease',
+          }}
+        >
+          <polygon points="120,56 136,48 120,28 104,48" fill="url(#wmBuildTop)" />
+          <polygon points="104,48 120,56 120,72 104,64" fill="url(#wmBuildSide)" />
+          <polygon points="120,56 136,48 136,64 120,72" fill="url(#wmBuildFace)" />
+          <circle cx="120" cy="34" r="5" fill="#FFC220" style={{ animation: 'wm-spark 1.2s ease-in-out infinite' }} />
+        </g>
+
+        {/* Construction crane arm / beam */}
+        <g style={{ animation: 'wm-crane 2.8s ease-in-out infinite', transformOrigin: '40px 40px' }}>
+          <line x1="36" y1="48" x2="36" y2="170" stroke="rgba(255,255,255,0.35)" strokeWidth="2" />
+          <line x1="36" y1="48" x2="150" y2="70" stroke="#FFC220" strokeWidth="2.5" strokeLinecap="round" />
+          <line
+            x1="150"
+            y1="70"
+            x2="150"
+            y2={90 + (100 - percent) * 0.45}
+            stroke="rgba(255,255,255,0.55)"
+            strokeWidth="1.5"
+            strokeDasharray="3 3"
+          />
+          <rect
+            x="142"
+            y={82 + (100 - percent) * 0.45}
+            width="16"
+            height="12"
+            rx="2"
+            fill="#FFC220"
+            opacity="0.9"
+          />
+        </g>
+
+        {/* Floating wireframe piece */}
+        <g
+          opacity="0.7"
+          style={{ animation: 'wm-float-piece 2.2s ease-in-out infinite' }}
+          stroke="#FFC220"
+          strokeWidth="1.5"
+          fill="none"
+        >
+          <polygon points="190,70 210,60 190,50 170,60" />
+          <polyline points="170,60 170,74 190,84 210,74 210,60" />
+          <line x1="190" y1="70" x2="190" y2="84" />
+        </g>
+      </svg>
+
+      <p className="absolute inset-x-0 bottom-1 text-center text-4xl sm:text-5xl font-semibold tabular-nums tracking-tight text-white drop-shadow">
+        {percent}
+        <span className="text-2xl sm:text-3xl text-[var(--wm-yellow)]">%</span>
+      </p>
+    </div>
+  )
 }
 
 export default function Article3dSection() {
@@ -300,17 +443,25 @@ export default function Article3dSection() {
       }}
     >
       <style>{`
-        @keyframes wm-orbit {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
         @keyframes wm-pulse-ring {
-          0%, 100% { transform: scale(0.92); opacity: 0.35; }
-          50% { transform: scale(1.08); opacity: 0.7; }
+          0%, 100% { transform: scale(0.92); opacity: 0.25; }
+          50% { transform: scale(1.06); opacity: 0.55; }
         }
         @keyframes wm-bar-shimmer {
           0% { background-position: 100% 0; }
           100% { background-position: -100% 0; }
+        }
+        @keyframes wm-crane {
+          0%, 100% { transform: rotate(-4deg); }
+          50% { transform: rotate(5deg); }
+        }
+        @keyframes wm-float-piece {
+          0%, 100% { transform: translate(0, 0) rotate(-6deg); opacity: 0.45; }
+          50% { transform: translate(-10px, 14px) rotate(4deg); opacity: 0.9; }
+        }
+        @keyframes wm-spark {
+          0%, 100% { opacity: 0.55; transform: scale(0.85); }
+          50% { opacity: 1; transform: scale(1.25); }
         }
       `}</style>
 
@@ -328,36 +479,15 @@ export default function Article3dSection() {
           aria-valuemax={100}
           aria-valuenow={percent}
         >
-          <div className="relative w-44 h-44 sm:w-56 sm:h-56" aria-hidden="true">
-            <div
-              className="absolute inset-0 rounded-full border-2 border-[var(--wm-yellow)]/25"
-              style={{ animation: 'wm-pulse-ring 2.4s ease-in-out infinite' }}
-            />
-            <div
-              className="absolute inset-3 rounded-full border-2 border-dashed border-white/35"
-              style={{ animation: 'wm-orbit 10s linear infinite' }}
-            />
-            <div
-              className="absolute inset-0"
-              style={{ animation: 'wm-orbit 2.8s linear infinite' }}
-            >
-              <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-[var(--wm-yellow)] shadow-[0_0_18px_rgba(255,194,32,0.85)]" />
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-4xl sm:text-5xl font-semibold tabular-nums tracking-tight text-white">
-                {percent}
-                <span className="text-2xl sm:text-3xl text-[var(--wm-yellow)]">%</span>
-              </p>
-            </div>
-          </div>
+          <ModelBuildAnimation percent={percent} />
 
-          <h2 className="mt-8 text-2xl sm:text-3xl font-semibold tracking-tight text-white">
-            {phase === 'uploading' ? 'Uploading your photo' : 'Generating your model'}
+          <h2 className="mt-6 text-2xl sm:text-3xl font-semibold tracking-tight text-white">
+            {phase === 'uploading' ? 'Uploading your photo' : 'Building your 3D model'}
           </h2>
           <p className="mt-2 text-sm sm:text-base text-white/70 max-w-md">
             {phase === 'uploading'
               ? 'Sending the article photo…'
-              : 'Building a rotatable 3D model from your photo.'}
+              : 'Stacking layers into a model you can rotate.'}
           </p>
 
           <div className="mt-8 w-full max-w-md h-2 rounded-full bg-white/15 overflow-hidden">
