@@ -8,8 +8,8 @@ const MAX_BYTES = 25 * 1024 * 1024
 const LAST_JOB_KEY = 'article3d:lastJobId'
 const POLL_MS = 4000
 const TIMEOUT_MS = 5 * 60 * 1000
-// Visual progress maps the typical mock/generate window; stays under 100 until the job finishes.
-const PROGRESS_TARGET_MS = 8000
+// Visual progress matches the typical ~30s generate time; holds at 100 until the job finishes.
+const PROGRESS_TARGET_MS = 30_000
 const TIMEOUT_MESSAGE = 'This is taking longer than expected. You can try another photo. If you leave this page, a finished model can still be opened from this job.'
 
 function rejectionReason(file) {
@@ -29,8 +29,8 @@ function timedOut(createdAt, now = Date.now()) {
 function progressPercent(createdAt, now, phase) {
   if (phase === 'uploading' || !createdAt) return 1
   const elapsed = Math.max(0, now - Date.parse(createdAt))
-  // Linear 1→99 over the expected generate window; hold at 99 until the job finishes.
-  return Math.min(99, Math.max(1, Math.floor((elapsed / PROGRESS_TARGET_MS) * 99)))
+  // Linear 1→100 over ~30s; stay at 100 if the job is still finishing.
+  return Math.min(100, Math.max(1, Math.floor((elapsed / PROGRESS_TARGET_MS) * 100)))
 }
 
 function ModelBuildAnimation({ percent }) {

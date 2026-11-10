@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 const API_BASE = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, '') || ''
 const MOCK = import.meta.env.VITE_ARTICLE_3D_MOCK === 'true'
 const SAMPLE_GLB = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb'
-const MOCK_READY_MS = 8000
+const MOCK_READY_MS = 30_000
 const FAIL_ERROR = 'This photo could not be turned into a model. Try a single product on a plain background.'
 
 const mockJobs = new Map()
