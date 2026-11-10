@@ -9,8 +9,8 @@ const MAX_BYTES = 25 * 1024 * 1024
 const LAST_JOB_KEY = 'article3d:lastJobId'
 const POLL_MS = 4000
 const TIMEOUT_MS = 5 * 60 * 1000
-// Visual progress matches the typical ~30s generate time; holds at 100 until the job finishes.
-const PROGRESS_TARGET_MS = 30_000
+// Visual progress matches the typical ~45s generate time; holds at 100 until the job finishes.
+const PROGRESS_TARGET_MS = 45_000
 const TIMEOUT_MESSAGE = 'This is taking longer than expected. You can try another photo. If you leave this page, a finished model can still be opened from this job.'
 
 function rejectionReason(file) {
@@ -30,14 +30,14 @@ function timedOut(createdAt, now = Date.now()) {
 function progressPercent(createdAt, now, phase) {
   if (phase === 'uploading' || !createdAt) return 1
   const elapsed = Math.max(0, now - Date.parse(createdAt))
-  // Linear 1→100 over ~30s; stay at 100 if the job is still finishing.
+  // Linear 1→100 over ~45s; stay at 100 if the job is still finishing.
   return Math.min(100, Math.max(1, Math.floor((elapsed / PROGRESS_TARGET_MS) * 100)))
 }
 
 function ModelBuildAnimation({ percent }) {
   const stage = Math.min(5, Math.floor(percent / 20) + 1)
   return (
-    <div className="relative w-56 h-56 sm:w-72 sm:h-72" aria-hidden="true">
+    <div className="relative w-44 h-44 sm:w-72 sm:h-72 max-w-[70vw] max-h-[42vh] aspect-square mx-auto" aria-hidden="true">
       <div
         className="absolute inset-6 rounded-full border border-[var(--wm-yellow)]/20"
         style={{ animation: 'wm-pulse-ring 3s ease-in-out infinite' }}
@@ -171,9 +171,9 @@ function ModelBuildAnimation({ percent }) {
         </g>
       </svg>
 
-      <p className="absolute inset-x-0 bottom-1 text-center text-4xl sm:text-5xl font-semibold tabular-nums tracking-tight text-white drop-shadow">
+      <p className="absolute inset-x-0 bottom-0 sm:bottom-1 text-center text-3xl sm:text-5xl font-semibold tabular-nums tracking-tight text-white drop-shadow">
         {percent}
-        <span className="text-2xl sm:text-3xl text-[var(--wm-yellow)]">%</span>
+        <span className="text-xl sm:text-3xl text-[var(--wm-yellow)]">%</span>
       </p>
     </div>
   )
@@ -299,12 +299,13 @@ export default function Article3dSection() {
   }, [])
 
   useEffect(() => {
-    if (phase !== 'uploading' && phase !== 'processing') return undefined
+    const modelPending = phase === 'ready' && !modelUrl && !modelError
+    if (phase !== 'uploading' && phase !== 'processing' && !modelPending) return undefined
     let frame = 0
     const tick = () => {
       const next = Date.now()
       setNow(next)
-      if (createdAt && timedOut(createdAt, next)) {
+      if (createdAt && timedOut(createdAt, next) && phase !== 'ready') {
         setPhase('timeout')
         stopPolling()
         return
@@ -313,7 +314,7 @@ export default function Article3dSection() {
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [phase, createdAt])
+  }, [phase, createdAt, modelUrl, modelError])
 
   useEffect(() => {
     if (phase !== 'ready' || !jobId) return undefined
@@ -423,18 +424,19 @@ export default function Article3dSection() {
   }
 
   const selected = Boolean(file && previewUrl)
-  const waiting = phase === 'uploading' || phase === 'processing'
+  const modelPending = phase === 'ready' && !modelUrl && !modelError
+  const waiting = phase === 'uploading' || phase === 'processing' || modelPending
   const showChooser = phase === 'idle'
   const percent = progressPercent(createdAt, now, phase)
 
   const secondaryBtn =
-    'inline-flex items-center justify-center px-4 py-2.5 rounded-lg border-2 border-white/70 bg-transparent text-sm font-semibold text-white hover:bg-white/10 transition-colors'
+    'inline-flex items-center justify-center gap-1.5 w-full sm:w-auto min-h-11 px-4 py-2.5 rounded-lg border-2 border-white/70 bg-transparent text-sm font-semibold text-white hover:bg-white/10 transition-colors'
   const primaryBtn =
-    'inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] hover:brightness-105 transition-[filter]'
+    'inline-flex items-center justify-center w-full sm:w-auto min-h-11 px-5 py-2.5 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] hover:brightness-105 transition-[filter]'
 
   return (
     <div
-      className="relative flex flex-col h-full min-h-0 overflow-hidden text-white"
+      className="relative flex flex-col h-full min-h-0 overflow-hidden text-white overscroll-none"
       style={{
         ['--wm-yellow']: '#FFC220',
         ['--wm-blue']: '#0071CE',
@@ -474,7 +476,7 @@ export default function Article3dSection() {
 
       {waiting ? (
         <div
-          className="relative flex-1 min-h-0 flex flex-col items-center justify-center px-6 text-center"
+          className="relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 sm:px-6 py-4 text-center"
           role="status"
           aria-live="polite"
           aria-valuemin={0}
@@ -483,16 +485,22 @@ export default function Article3dSection() {
         >
           <ModelBuildAnimation percent={percent} />
 
-          <h2 className="mt-6 text-2xl sm:text-3xl font-semibold tracking-tight text-white">
-            {phase === 'uploading' ? 'Uploading your photo' : 'Building your 3D model'}
+          <h2 className="mt-4 sm:mt-6 text-xl sm:text-3xl font-semibold tracking-tight text-white px-2">
+            {modelPending
+              ? 'Opening your model'
+              : phase === 'uploading'
+                ? 'Uploading your photo'
+                : 'Building your 3D model'}
           </h2>
-          <p className="mt-2 text-sm sm:text-base text-white/70 max-w-md">
-            {phase === 'uploading'
-              ? 'Sending the article photo…'
-              : 'Stacking layers into a model you can rotate.'}
+          <p className="mt-2 text-xs sm:text-base text-white/70 max-w-md px-2">
+            {modelPending
+              ? 'Loading the 3D model…'
+              : phase === 'uploading'
+                ? 'Sending the article photo…'
+                : 'Stacking layers into a model you can rotate.'}
           </p>
 
-          <div className="mt-8 w-full max-w-md h-2 rounded-full bg-white/15 overflow-hidden">
+          <div className="mt-5 sm:mt-8 w-full max-w-md h-2 rounded-full bg-white/15 overflow-hidden">
             <div
               className="h-full rounded-full transition-[width] duration-150 ease-out"
               style={{
@@ -512,14 +520,16 @@ export default function Article3dSection() {
             alt="Generated article model"
             camera-controls=""
             auto-rotate=""
+            touch-action="pan-y"
             shadow-intensity="1"
             className="block w-full h-full min-h-0 bg-[#f4f7fb]"
           />
-          <div className="absolute top-4 left-4 sm:top-5 sm:left-5 flex flex-wrap items-center gap-2 z-10">
+          {/* Desktop: controls top-left */}
+          <div className="hidden sm:flex absolute top-5 left-5 flex-wrap items-center gap-2 z-10">
             <button
               type="button"
               onClick={resetToIdle}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/95 text-sm font-semibold text-[var(--wm-blue)] shadow-md hover:bg-white transition-colors"
+              className="inline-flex items-center gap-1.5 min-h-10 px-3 py-2 rounded-lg bg-white/95 text-sm font-semibold text-[var(--wm-blue)] shadow-md hover:bg-white transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M15 18l-6-6 6-6" />
@@ -529,16 +539,13 @@ export default function Article3dSection() {
             <button
               type="button"
               onClick={resetToIdle}
-              className="inline-flex items-center px-3 py-2 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] shadow-md hover:brightness-105 transition-[filter]"
+              className="inline-flex items-center min-h-10 px-3 py-2 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] shadow-md hover:brightness-105 transition-[filter]"
             >
               Upload another photo
             </button>
           </div>
-          <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/90 bg-black/35 rounded-full px-3 py-1.5">
-            Drag to orbit, scroll to zoom.
-          </p>
           {previewUrl && (
-            <div className="absolute top-4 right-4 sm:top-5 sm:right-5 w-20 h-20 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-[var(--wm-yellow)] shadow-lg bg-white z-10">
+            <div className="absolute top-3 right-3 sm:top-5 sm:right-5 w-14 h-14 sm:w-28 sm:h-28 rounded-lg sm:rounded-xl overflow-hidden border-2 border-[var(--wm-yellow)] shadow-lg bg-white z-10">
               <img
                 src={previewUrl}
                 alt={file?.name ? `Uploaded photo ${file.name}` : 'Uploaded photo'}
@@ -546,58 +553,87 @@ export default function Article3dSection() {
               />
             </div>
           )}
+          <p className="pointer-events-none absolute left-1/2 -translate-x-1/2 text-[11px] sm:text-sm text-white/90 bg-black/35 rounded-full px-3 py-1.5 bottom-20 sm:bottom-4 max-w-[90vw] text-center">
+            Drag to orbit, scroll to zoom.
+          </p>
+          {/* Mobile: full-width action bar above the home indicator */}
+          <div
+            className="sm:hidden absolute inset-x-0 bottom-0 z-10 flex gap-2 p-3 bg-gradient-to-t from-black/55 via-black/35 to-transparent"
+            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+          >
+            <button
+              type="button"
+              onClick={resetToIdle}
+              className="inline-flex flex-1 items-center justify-center gap-1.5 min-h-11 px-3 py-2 rounded-lg bg-white/95 text-sm font-semibold text-[var(--wm-blue)] shadow-md"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={resetToIdle}
+              className="inline-flex flex-[1.4] items-center justify-center min-h-11 px-3 py-2 rounded-lg bg-[var(--wm-yellow)] text-sm font-semibold text-[var(--wm-blue)] shadow-md"
+            >
+              Upload another
+            </button>
+          </div>
         </div>
       ) : (
-        <div className="relative flex flex-col flex-1 min-h-0 px-4 sm:px-8 pt-8 pb-6">
+        <div
+          className="relative flex flex-col flex-1 min-h-0 px-3 sm:px-8 pt-5 sm:pt-8 overflow-y-auto"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        >
           <header className="flex-shrink-0 max-w-3xl">
-            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-white">
+            <h1 className="text-2xl sm:text-4xl font-semibold tracking-tight text-white">
               Photo to 3D
             </h1>
-            <p className="mt-2 text-sm sm:text-base text-white/75">
+            <p className="mt-1.5 sm:mt-2 text-xs sm:text-base text-white/75">
               One article photo becomes a model you can rotate.
             </p>
           </header>
 
-          <div className="flex-1 min-h-0 mt-6 flex flex-col gap-4">
+          <div className="flex-1 min-h-0 mt-4 sm:mt-6 flex flex-col gap-3 sm:gap-4">
             {(showChooser || previewUrl) && (
               <div
                 onDragEnter={onDragEnter}
                 onDragOver={onDragOver}
                 onDragLeave={onDragLeave}
                 onDrop={onDrop}
-                className={`flex-1 min-h-[280px] rounded-2xl border-2 border-dashed transition-colors ${
+                className={`flex-1 min-h-[200px] sm:min-h-[280px] rounded-2xl border-2 border-dashed transition-colors ${
                   dragging && showChooser
                     ? 'border-[var(--wm-yellow)] bg-[var(--wm-yellow)]/20'
                     : 'border-white/45 bg-white/10'
                 }`}
               >
                 {previewUrl ? (
-                  <div className="h-full flex flex-col p-4 sm:p-6">
+                  <div className="h-full flex flex-col p-3 sm:p-6">
                     <img
                       src={previewUrl}
                       alt=""
                       className="flex-1 w-full min-h-0 object-contain rounded-xl bg-black/15"
                     />
                     {file && (
-                      <p className="mt-3 text-sm font-medium text-white truncate">{file.name}</p>
+                      <p className="mt-2 sm:mt-3 text-sm font-medium text-white truncate">{file.name}</p>
                     )}
                   </div>
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-[var(--wm-yellow)]" aria-hidden="true">
+                  <div className="h-full flex flex-col items-center justify-center gap-2 sm:gap-3 px-4 sm:px-6 text-center">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-[var(--wm-yellow)] sm:w-9 sm:h-9" aria-hidden="true">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                       <polyline points="17 8 12 3 7 8" />
                       <line x1="12" y1="3" x2="12" y2="15" />
                     </svg>
-                    <p className="text-lg sm:text-xl font-semibold text-white">Drop one article photo here</p>
-                    <p className="text-sm text-white/70">JPG, PNG, or WebP · up to 25 MB</p>
+                    <p className="text-base sm:text-xl font-semibold text-white">Drop one article photo here</p>
+                    <p className="text-xs sm:text-sm text-white/70">JPG, PNG, or WebP · up to 25 MB</p>
                   </div>
                 )}
               </div>
             )}
 
             {showChooser && (
-              <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
@@ -610,7 +646,7 @@ export default function Article3dSection() {
                   onClick={() => setCameraOpen(true)}
                   className={secondaryBtn}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                     <circle cx="12" cy="13" r="4" />
                   </svg>
