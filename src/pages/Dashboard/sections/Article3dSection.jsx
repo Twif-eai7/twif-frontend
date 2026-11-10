@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import '@google/model-viewer'
+import CameraCaptureModal from '../../../components/plm/modals/CameraCaptureModal'
 import { createArticle3dJob, getArticle3dJob, getArticle3dModel } from '../../../services/article3d'
 
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -197,6 +198,7 @@ export default function Article3dSection() {
   const [modelError, setModelError] = useState('')
   const [createdAt, setCreatedAt] = useState(null)
   const [now, setNow] = useState(() => Date.now())
+  const [cameraOpen, setCameraOpen] = useState(false)
 
   function stopPolling() {
     pollRef.current.stopped = true
@@ -603,6 +605,17 @@ export default function Article3dSection() {
                 >
                   {selected ? 'Choose a different photo' : 'Choose photo'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setCameraOpen(true)}
+                  className={secondaryBtn}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5" aria-hidden="true">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                  Take photo
+                </button>
                 <input
                   ref={inputRef}
                   type="file"
@@ -616,6 +629,16 @@ export default function Article3dSection() {
                   </button>
                 )}
               </div>
+            )}
+
+            {cameraOpen && (
+              <CameraCaptureModal
+                onCapture={(shot) => {
+                  applyFile(shot)
+                  setCameraOpen(false)
+                }}
+                onDone={() => setCameraOpen(false)}
+              />
             )}
 
             {error && phase !== 'failed' && (
