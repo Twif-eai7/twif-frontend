@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import '@google/model-viewer'
 import CameraCaptureModal from '../../../components/plm/modals/CameraCaptureModal'
-import { createArticle3dJob, getArticle3dJob, getArticle3dModel } from '../../../services/article3d'
+import { createArticle3dJob, getArticle3dJob, getArticle3dModel, listArticle3dJobs } from '../../../services/article3d'
 
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 // The API compresses down to Hunyuan's 6 MB limit. 25 MB only stops huge uploads.
@@ -199,6 +199,7 @@ export default function Article3dSection() {
   const [createdAt, setCreatedAt] = useState(null)
   const [now, setNow] = useState(() => Date.now())
   const [cameraOpen, setCameraOpen] = useState(false)
+  const [savedJobs, setSavedJobs] = useState([])
 
   function stopPolling() {
     pollRef.current.stopped = true
@@ -297,6 +298,37 @@ export default function Article3dSection() {
       stopPolling()
     }
   }, [])
+
+  useEffect(() => {
+    if (phase !== 'idle') return undefined
+    let cancelled = false
+    listArticle3dJobs()
+      .then((jobs) => {
+        if (!cancelled) setSavedJobs(jobs)
+      })
+      .catch(() => {
+        if (!cancelled) setSavedJobs([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [phase])
+
+  function openSaved(saved) {
+    generatingRef.current = false
+    stopPolling()
+    revokePreview()
+    setFile(null)
+    setError('')
+    setJobError('')
+    setModelError('')
+    setModelUrl(null)
+    setPreviewUrl(saved.photoUrl || null)
+    setJobId(saved.id)
+    setCreatedAt(saved.createdAt)
+    setPhase('ready')
+    try { sessionStorage.setItem(LAST_JOB_KEY, saved.id) } catch { /* storage unavailable */ }
+  }
 
   useEffect(() => {
     const modelPending = phase === 'ready' && !modelUrl && !modelError
@@ -665,6 +697,33 @@ export default function Article3dSection() {
                   </button>
                 )}
               </div>
+            )}
+
+            {showChooser && savedJobs.length > 0 && (
+              <section className="flex-shrink-0" aria-label="Saved models">
+                <h2 className="text-sm font-semibold text-white">Saved models</h2>
+                <div className="mt-2 flex gap-3 overflow-x-auto pb-1">
+                  {savedJobs.map((saved) => (
+                    <button
+                      key={saved.id}
+                      type="button"
+                      onClick={() => openSaved(saved)}
+                      className="flex-shrink-0 w-24 text-left"
+                    >
+                      <span className="block w-24 h-24 rounded-xl overflow-hidden border-2 border-white/40 bg-white/10">
+                        {saved.photoUrl ? (
+                          <img src={saved.photoUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="flex h-full items-center justify-center text-[11px] text-white/70">3D</span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-white/75 truncate">
+                        {new Date(saved.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
             )}
 
             {cameraOpen && (

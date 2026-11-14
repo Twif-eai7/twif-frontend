@@ -59,6 +59,18 @@ export async function createArticle3dJob(file) {
   return res.json()
 }
 
+export async function listArticle3dJobs() {
+  if (MOCK) return []
+
+  const token = await requireToken()
+  const res = await fetch(`${API_BASE}/article-3d/jobs`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  await throwIfNotOk(res)
+  const body = await res.json()
+  return Array.isArray(body.jobs) ? body.jobs : []
+}
+
 export async function getArticle3dJob(id) {
   if (MOCK) return mockGet(id)
 
