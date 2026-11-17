@@ -26,6 +26,10 @@ export default function PLMVedeeoPage() {
   const videoCallConnecting = usePlmStore(s => s.videoCallConnecting)
 
   const startedRef = useRef(false)
+  // True only after this page has actually shown a join URL. Used so a guest
+  // whose host ends the call leaves /plm/vedeeo instead of sticking on
+  // "Connecting…", without redirecting on the initial empty/connecting state.
+  const hadJoinUrlRef = useRef(false)
 
   useEffect(() => {
     if (!workspaceId) {
@@ -52,6 +56,18 @@ export default function PLMVedeeoPage() {
       navigate(`/plm?workspace=${workspaceId}`, { replace: true })
     })
   }, [workspaceId, memberId, userName, inviteId])
+
+  useEffect(() => {
+    if (activeVideoCall?.workspaceId === workspaceId && activeVideoCall.joinUrl) {
+      hadJoinUrlRef.current = true
+      return
+    }
+    if (!hadJoinUrlRef.current || !workspaceId) return
+    // Call for this workspace went away after we had joined — guest leave path.
+    // Host already navigates away from handleLeave; replace is harmless there too.
+    if (activeVideoCall?.workspaceId === workspaceId) return
+    navigate(`/plm?workspace=${workspaceId}`, { replace: true })
+  }, [activeVideoCall, workspaceId, navigate])
 
   const handleLeave = async () => {
     if (workspaceId && memberId) {

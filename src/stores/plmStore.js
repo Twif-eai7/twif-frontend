@@ -1952,6 +1952,10 @@ export const usePlmStore = create(
               if (payload.action === 'declined' || payload.action === 'cancelled' || payload.action === 'ended') {
                 set(s => ({
                   incomingVideoCall: s.incomingVideoCall?.workspaceId === workspaceId ? null : s.incomingVideoCall,
+                  // Same as the video_call_ended milestone: guests still on /plm/vedeeo
+                  // keep the dead iframe until activeVideoCall is cleared.
+                  activeVideoCall: payload.action === 'ended' && s.activeVideoCall?.workspaceId === workspaceId
+                    ? null : s.activeVideoCall,
                   activeWorkspace: s.activeWorkspace?.id === workspaceId
                     ? { ...s.activeWorkspace, video_room_name: null, video_room_url: null }
                     : s.activeWorkspace,
